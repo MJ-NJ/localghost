@@ -1,0 +1,12 @@
+[ambient low]
+You told yourself the hallway light was off when you left.
+[pause 1.5]
+[whisper] It isn't now.
+[sfx creak] [light flicker]
+[pause 3]
+The grey coat on your door [pause 0.8] [slow] has one sleeve raised.
+[gasp] [light blackout 3]
+[pause 2]
+Something is breathing, [pause 1] very softly, [pause 1] behind the wall.
+[pause 3]
+[ambient stop]
