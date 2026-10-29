@@ -101,3 +101,25 @@ User feedback after M1: voice "robotic", pauses "like a paragraph reading". Prob
 ## ADR-016 Immersive playback UI and sample reuse (Accepted, user-approved, M2)
 - While a story plays or is paused the top bar and drawer are hidden. Pause/Stop become small corner icons that fade after 3 s of inactivity and return on mouse move or key press (also on hover/focus, so they stay keyboard-reachable). Space pauses, Esc stops. Rationale: centred bordered buttons broke the mood; Stop must still be reachable for accessibility/photosensitivity.
 - **Play sample** reuses the existing synthesis when the voice is unchanged (in-memory, per page load); changing the voice re-synthesizes. This is a stopgap: the persistent audio cache is M5. Risk: if the sample script ever changes without a reload (it can't today), stale audio would play.
+
+## ADR-017 Allowed [light] modes per scare level: cumulative ladder (Accepted, user-approved, M3)
+- PLAN.md only names some modes per level. Mapping used (`director/profiles.ts`): L1 pulse, calm. L2 + flicker. L3 + blackout. L4 and L5 + red. L1's "only pulse/calm" restricts **lights only**; `[sfx]` is allowed within the budget.
+- **Enforcement is by prompt only**: the tag list and the style example given to the model contain only the allowed light modes. The parser does not reject a disallowed mode if the model emits it anyway, so a small model can still play e.g. a flicker at L1. If that shows up in testing, add a post-parse filter in the director.
+- **Deviation from the plan template:** the plan's prompt lists all light modes and its example uses `[light flicker]` and `[light blackout 3]`. At low levels that example would contradict the restriction (and small models copy examples), so the example swaps in `pulse`/`calm` where the level disallows them.
+
+## ADR-018 Format-repair retry (Accepted, user-approved, M3)
+- Trigger (from plan): fewer than 10 spoken words or zero non-speech tags. One retry only.
+- The correction line is appended to the **user** message ("Begin.\n\nYour previous output broke the format. Output only the cue script."); the bad output is not echoed back.
+- If the retry is also broken, we keep whichever attempt has more spoken words and play it (`degraded: true`). If there is no speech at all, the UI shows an error instead of playing.
+
+## ADR-019 Generation parameters and metrics (Provisional, M3)
+- Temperature 0.9 (plan). `max_tokens` 2048 (**our choice**, plan is silent): above the longest target (about 800 words, roughly 1,100 tokens, plus tags) but stops a runaway. If a long level-5 story gets cut mid-sentence, raise `MAX_TOKENS` in `director/director.ts`.
+- **Tokens/s is approximate**: it counts SSE stream chunks, which is usually one token per chunk on Ollama but not guaranteed. Good enough for the write-up; don't quote it as exact.
+- Time-to-first-token and generation time are recorded in the DebugPanel.
+
+## ADR-020 LLM adapter assumptions (Accepted, M3)
+- `caps.vision` is assumed `true`: it cannot be known without calling the model. The M4 vision pass must handle a model that rejects images.
+- **Default model is empty on purpose** (plan: do not guess the Gemma 4 tag). The Story model field must be filled from `ollama list`; an empty value gives a clear error. `DEFAULT_MODEL` in `adapters/llm/presets.ts` should be set once the tag is confirmed.
+- API key and LLM settings are stored in `localStorage` (plain text, as the plan says) and sent only to the configured base URL.
+- Connection failure to a local host shows the `OLLAMA_ORIGINS` explanation with copyable commands. For a non-local host it shows a generic network/CORS message.
+- The voice model loads **in parallel** with story generation to hide its load time.

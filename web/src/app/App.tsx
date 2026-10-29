@@ -2,16 +2,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CueParser } from "../cue/parser";
 import { segment } from "../cue/segmenter";
 import type { Style } from "../cue/spec";
+import { OpenAICompatAdapter } from "../adapters/llm/openaiCompat";
+import { direct, countSpeechWords } from "../director/director";
 import { DEFAULT_KOKORO_VOICE, KokoroWebAdapter, type KokoroProgress } from "../adapters/tts/kokoroWeb";
 import type { VoiceInfo } from "../adapters/tts/types";
 import { Effects } from "../engine/effects";
 import { Player, prepare, type PlayerState, type Prepared } from "../engine/player";
 import { timing } from "../lib/timing";
 import { DebugPanel } from "./DebugPanel";
+import { ErrorView } from "./ErrorView";
+import { SettingsPanel } from "./SettingsPanel";
+import { loadLLMSettings, saveLLMSettings, type LLMSettings } from "./settings";
 import { Stage } from "./Stage";
 
 type DrawerTab = "settings" | "memories" | "debug";
-type Phase = "idle" | "loading" | "summoning";
+type Phase = "idle" | "loading" | "writing" | "summoning";
+type Source = "sample" | "story";
 
 const readFlag = (key: string) => {
   try {
@@ -38,11 +44,13 @@ export function App() {
   const [line, setLine] = useState<{ text: string; style: Style; n: number } | null>(null);
   const [voices, setVoices] = useState<VoiceInfo[]>([]);
   const [voice, setVoice] = useState(DEFAULT_KOKORO_VOICE);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<unknown>(null);
+  const [draft, setDraft] = useState("");
+  const [llm, setLlm] = useState<LLMSettings>(loadLLMSettings);
+  const [pendingSource, setPendingSource] = useState<Source | null>(null);
   const [device, setDevice] = useState("");
   const [reduceFlashing, setReduceFlashing] = useState(() => readFlag("reduceFlashing"));
-  const [showNotice, setShowNotice] = useState(false);
-  const [hasStory, setHasStory] = useState(false);
+    const [hasStory, setHasStory] = useState(false);
 
   const fxBlack = useRef<HTMLDivElement>(null);
   const fxRed = useRef<HTMLDivElement>(null);
@@ -54,7 +62,7 @@ export function App() {
   const abort = useRef<AbortController | null>(null);
   const player = useRef<Player | null>(null);
   const prepared = useRef<Prepared | null>(null);
-  const preparedVoice = useRef<string | null>(null);
+  const preparedKey = useRef<string | null>(null);
   const [hudVisible, setHudVisible] = useState(true);
   const lineN = useRef(0);
   const adapter = useMemo(() => new KokoroWebAdapter(setProgress), []);
@@ -93,25 +101,47 @@ export function App() {
     if (adapter.status) setDevice(`${adapter.status.device}/${adapter.status.dtype}`);
   }
 
-  async function playSample() {
-    setError("");
+  const isAbort = (e: unknown) => e instanceof DOMException && e.name === "AbortError";
+
+  async function begin(source: Source) {
+    setError(null);
     setLine(null);
+    setDraft("");
     const ac = new AbortController();
     abort.current = ac;
     try {
       getPlayer(); // create the AudioContext inside the user gesture
-      if (prepared.current && preparedVoice.current === voice) {
+      if (source === "sample" && prepared.current && preparedKey.current === `sample:${voice}`) {
         await run(prepared.current); // same script + voice: reuse the synthesis (M5 adds the real cache)
         return;
       }
-      setPhase("loading");
-      await ensureModel();
 
-      const res = await fetch(`${import.meta.env.BASE_URL}sample/sample.cue.txt`);
-      if (!res.ok) throw new Error(`Could not load the sample script (${res.status})`);
-      const { events, stats } = CueParser.parse(await res.text());
-      if (stats.unknownTags) timing.count("unknown tags dropped", stats.unknownTags);
-      const segments = segment(events, { maxChars: adapter.caps.maxChars, targetChars: 0 });
+      let segments;
+      if (source === "sample") {
+        setPhase("loading");
+        await ensureModel();
+        const res = await fetch(`${import.meta.env.BASE_URL}sample/sample.cue.txt`);
+        if (!res.ok) throw new Error(`Could not load the sample script (${res.status})`);
+        const { events, stats } = CueParser.parse(await res.text());
+        if (stats.unknownTags) timing.count("unknown tags dropped", stats.unknownTags);
+        segments = segment(events, { maxChars: adapter.caps.maxChars, targetChars: 0 });
+      } else {
+        setPhase("writing");
+        const voiceLoad = ensureModel(); // load the voice while the model writes
+        voiceLoad.catch(() => {}); // surfaced below if it is still failing when we need it
+        const result = await direct({
+          adapter: new OpenAICompatAdapter(llm),
+          level,
+          signal: ac.signal,
+          onText: (d) => setDraft((t) => t + d),
+        });
+        if (countSpeechWords(result.events) === 0) {
+          throw new Error("The model returned no spoken text. Try again, or try a different model.");
+        }
+        segments = segment(result.events, { maxChars: adapter.caps.maxChars, targetChars: 0 });
+        setPhase("loading");
+        await voiceLoad;
+      }
 
       setPhase("summoning");
       const p = await prepare(segments, {
@@ -121,32 +151,34 @@ export function App() {
         onProgress: (d, t) => setPrerender([d, t]),
       });
       prepared.current = p;
-      preparedVoice.current = voice;
+      preparedKey.current = source === "sample" ? `sample:${voice}` : "story";
       setHasStory(true);
       setPhase("idle");
       setPrerender(null);
+      setDraft("");
       await run(p);
     } catch (e) {
-      if (!(e instanceof DOMException && e.name === "AbortError")) setError(String(e instanceof Error ? e.message : e));
+      if (!isAbort(e)) setError(e);
       setPhase("idle");
       setPrerender(null);
+      setDraft("");
     }
   }
 
   async function loadModel() {
-    setError("");
+    setError(null);
     setPhase("loading");
     try {
       await ensureModel();
     } catch (e) {
-      setError(String(e instanceof Error ? e.message : e));
+      setError(e);
     }
     setPhase("idle");
   }
 
-  const requestPlay = () => {
-    if (readFlag("photosensitivityAck")) void playSample();
-    else setShowNotice(true);
+  const request = (source: Source) => {
+    if (readFlag("photosensitivityAck")) void begin(source);
+    else setPendingSource(source);
   };
 
   const replay = () => {
@@ -220,10 +252,13 @@ export function App() {
       window.removeEventListener("keydown", wake);
     };
   }, [active]);
+
   const pct = progress && progress.total ? Math.round((progress.loaded / progress.total) * 100) : null;
 
   const hint =
-    phase === "loading" ? (
+    phase === "writing" ? (
+      "Summoning…"
+    ) : phase === "loading" ? (
       <>
         Loading voice model{pct !== null ? ` — ${pct}%` : "…"}
         {progress ? <div>{progress.file}</div> : null}
@@ -236,7 +271,7 @@ export function App() {
       "The Stage. Nothing is summoned yet."
     ) : null;
 
-  const controls = showNotice ? (
+  const controls = pendingSource ? (
     <div className="notice">
       <p>
         <strong>Photosensitivity notice.</strong> This experience uses flickering lights, blackouts and red flashes. Turn on
@@ -246,8 +281,9 @@ export function App() {
         className="primary"
         onClick={() => {
           writeFlag("photosensitivityAck", true);
-          setShowNotice(false);
-          void playSample();
+          const src = pendingSource;
+          setPendingSource(null);
+          void begin(src);
         }}
       >
         I understand, begin
@@ -265,9 +301,10 @@ export function App() {
     <button onClick={stop}>Stop</button>
   ) : active ? null : (
     <>
-      <button className="primary" onClick={requestPlay}>
-        Play sample
+      <button className="primary" onClick={() => request("story")}>
+        Tell me a story
       </button>{" "}
+      <button onClick={() => request("sample")}>Play sample</button>{" "}
       {hasStory && <button onClick={replay}>Replay</button>}
     </>
   );
@@ -278,7 +315,7 @@ export function App() {
         <h1>Localghost</h1>
         <div className="dial">
           <span>Scare</span>
-          <input type="range" min={1} max={5} value={level} onChange={(e) => setLevel(Number(e.target.value))} />
+          <input type="range" min={1} max={5} value={level} disabled={busy} onChange={(e) => setLevel(Number(e.target.value))} />
           <span>{level}</span>
         </div>
         <span className="spacer" />
@@ -291,7 +328,8 @@ export function App() {
           fxVignette={fxVignette}
           line={line}
           hint={hint}
-          error={error}
+          draft={draft}
+          error={error != null ? <ErrorView error={error} /> : null}
           controls={controls}
           playerState={playerState}
         />
@@ -315,34 +353,24 @@ export function App() {
           </div>
           <div className="panel">
             {tab === "settings" && (
-              <>
-                <label>
-                  Voice (Kokoro)
-                  <select value={voice} onChange={(e) => setVoice(e.target.value)} disabled={busy || active}>
-                    {!voices.length && <option value={voice}>{voice} (load model to list voices)</option>}
-                    {voices.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button onClick={loadModel} disabled={busy || active}>
-                  Load voice model
-                </button>
-                {device && <div className="badge">Running on {device}</div>}
-                <label className="check">
-                  <input
-                    type="checkbox"
-                    checked={reduceFlashing}
-                    onChange={(e) => {
-                      setReduceFlashing(e.target.checked);
-                      writeFlag("reduceFlashing", e.target.checked);
-                    }}
-                  />
-                  Reduce flashing
-                </label>
-              </>
+              <SettingsPanel
+                llm={llm}
+                onLlm={(v) => {
+                  setLlm(v);
+                  saveLLMSettings(v);
+                }}
+                voices={voices}
+                voice={voice}
+                onVoice={setVoice}
+                device={device}
+                locked={busy || active}
+                onLoadVoiceModel={loadModel}
+                reduceFlashing={reduceFlashing}
+                onReduceFlashing={(on) => {
+                  setReduceFlashing(on);
+                  writeFlag("reduceFlashing", on);
+                }}
+              />
             )}
             {tab === "memories" && <div className="hint">Coming in M4.</div>}
             {tab === "debug" && <DebugPanel />}

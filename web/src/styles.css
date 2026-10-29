@@ -147,3 +147,10 @@ button.primary { border-color: var(--accent); color: var(--accent); }
   font-size: 0.8rem;
 }
 .hud button:hover { color: var(--accent); }
+
+.stage .draft { max-width: 52ch; font-family: var(--font-display); font-size: 1.15rem; line-height: 1.5; color: var(--text-dim); opacity: 0.55; white-space: pre-wrap; }
+.error { color: #d08080; max-width: 60ch; text-align: left; }
+.error .cmd { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
+.error .cmd small { flex-basis: 100%; color: var(--text-dim); }
+.error code { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.2rem 0.4rem; color: var(--text); word-break: break-all; }
+.drawer h3 { margin: 0.4rem 0 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); }

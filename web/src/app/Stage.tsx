@@ -8,7 +8,9 @@ export interface StageProps {
   fxVignette: RefObject<HTMLDivElement | null>;
   line: { text: string; style: Style; n: number } | null;
   hint: ReactNode;
-  error: string;
+  error: ReactNode;
+  /** Raw streamed LLM text while the story is being written. */
+  draft: string;
   controls: ReactNode;
   playerState: PlayerState;
 }
@@ -22,7 +24,8 @@ export function Stage(p: StageProps) {
           {p.line.text}
         </div>
       )}
-      {p.error && <div className="hint" style={{ color: "var(--alarm)" }}>{p.error}</div>}
+      {p.draft && <div className="draft">{p.draft.replace(/\[[^\]]*\]?/g, "").trim().slice(-500)}</div>}
+      {p.error && <div className="hint">{p.error}</div>}
       <div className="controls">{p.controls}</div>
       <div className="fx">
         <div className="fx-black" ref={p.fxBlack} />
