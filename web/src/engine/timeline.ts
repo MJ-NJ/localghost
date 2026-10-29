@@ -32,40 +32,71 @@ export interface Timeline {
   total: number;
 }
 
-export function schedule(events: CueEvent[], buffers: ReadonlyMap<CueEvent, AudioBuffer>): Timeline {
-  const items: TimedEvent[] = [];
-  let cursor = 0;
-  let end = 0;
+/**
+ * Builds the timeline incrementally. advance() walks events as far as the synthesized
+ * buffers allow and stops at the first speech event that has none yet (streaming playback).
+ */
+export class TimelineBuilder {
+  readonly items: TimedEvent[] = [];
+  private i = 0;
+  private cursor = 0;
+  private ambientEnd = 0;
 
-  for (const ev of events) {
-    switch (ev.kind) {
-      case "speech": {
+  constructor(private readonly events: readonly CueEvent[]) {}
+
+  /** Returns the items added by this call. */
+  advance(buffers: ReadonlyMap<CueEvent, AudioBuffer>): TimedEvent[] {
+    const added: TimedEvent[] = [];
+    const push = (t: TimedEvent) => {
+      this.items.push(t);
+      added.push(t);
+    };
+    while (this.i < this.events.length) {
+      const ev = this.events[this.i];
+      if (ev.kind === "speech") {
         const buffer = buffers.get(ev);
-        const duration = buffer?.duration ?? 0;
-        items.push({ at: cursor, duration, ev, buffer });
-        cursor += duration + PACING.speechGap;
-        break;
-      }
-      case "pause":
-        items.push({ at: cursor, duration: ev.seconds, ev });
-        cursor += ev.seconds;
-        break;
-      case "nonverbal": {
+        if (!buffer) break; // not synthesized yet
+        push({ at: this.cursor, duration: buffer.duration, ev, buffer });
+        this.cursor += buffer.duration + PACING.speechGap;
+      } else if (ev.kind === "pause") {
+        push({ at: this.cursor, duration: ev.seconds, ev });
+        this.cursor += ev.seconds;
+      } else if (ev.kind === "nonverbal") {
         const duration = PACING.nonverbal[ev.nv];
-        items.push({ at: cursor, duration, ev });
-        cursor += duration;
-        break;
-      }
-      case "ambient":
-        items.push({ at: cursor, duration: 0, ev });
-        if (ev.mode === "stop") end = Math.max(end, cursor + PACING.ambientStopFade);
-        break;
-      default:
+        push({ at: this.cursor, duration, ev });
+        this.cursor += duration;
+      } else {
         // sfx / light / ambient / photo are stamped at the cursor and take no time
-        items.push({ at: cursor, duration: 0, ev });
+        push({ at: this.cursor, duration: 0, ev });
+        if (ev.kind === "ambient" && ev.mode === "stop") {
+          this.ambientEnd = Math.max(this.ambientEnd, this.cursor + PACING.ambientStopFade);
+        }
+      }
+      this.i++;
     }
+    return added;
   }
-  return { items, total: Math.max(cursor + PACING.tail, end) };
+
+  /** Every event has been placed on the timeline. */
+  get complete(): boolean {
+    return this.i >= this.events.length;
+  }
+
+  /** Timeline seconds known so far; while incomplete, where the next unsynthesized speech would start. */
+  get frontier(): number {
+    return this.cursor;
+  }
+
+  get total(): number {
+    return Math.max(this.cursor + PACING.tail, this.ambientEnd);
+  }
+}
+
+/** One-shot schedule for when every buffer already exists. */
+export function schedule(events: CueEvent[], buffers: ReadonlyMap<CueEvent, AudioBuffer>): Timeline {
+  const b = new TimelineBuilder(events);
+  b.advance(buffers);
+  return { items: b.items, total: b.total };
 }
 
 /** Intervals during which the ambient bed should be ducked (speech spans, merged across short gaps). */

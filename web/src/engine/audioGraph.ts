@@ -1,7 +1,7 @@
 // voice -> styleChain -> voiceBus -> (dry + reverb) -> master -> destination
 // ambient -> ambientBus (ducked) -> master;  sfx -> sfxBus -> master
 import type { Style } from "../cue/spec";
-import { PACING, type TimedEvent, duckIntervals } from "./timeline";
+import { PACING } from "./timeline";
 
 const IR_SECONDS = 2.5;
 
@@ -52,17 +52,32 @@ export class AudioGraph {
     src.connect(this.voiceBus);
   }
 
-  /** Lower the ambient bed while speech plays. `t0` is the absolute context time of timeline 0. */
-  scheduleDucking(items: TimedEvent[], t0: number) {
+  private duckEnd: number | null = null;
+  private duckT0 = 0;
+
+  /** Call once at playback start. `t0` is the absolute context time of timeline 0. */
+  beginDucking(t0: number) {
+    this.duckT0 = t0;
+    this.duckEnd = null;
+    this.ambientBus.gain.setValueAtTime(1, t0);
+  }
+
+  /**
+   * Lower the ambient bed while a speech segment [s, e] (timeline seconds) plays. Called as segments become
+   * known; a segment that starts soon after the previous one extends that duck instead of re-opening the bed.
+   */
+  duckForSpeech(s: number, e: number) {
     const g = this.ambientBus.gain;
-    g.setValueAtTime(1, t0);
-    for (const [s, e] of duckIntervals(items)) {
-      const a = t0 + Math.max(0, s - PACING.duckRampIn);
-      g.setValueAtTime(1, a);
+    const t0 = this.duckT0;
+    if (this.duckEnd !== null && s - this.duckEnd < PACING.duckMergeGap) {
+      g.cancelScheduledValues(t0 + this.duckEnd); // drop the planned release; it is re-planned below
+    } else {
+      g.setValueAtTime(1, t0 + Math.max(0, s - PACING.duckRampIn));
       g.linearRampToValueAtTime(PACING.duckGain, t0 + s);
-      g.setValueAtTime(PACING.duckGain, t0 + e);
-      g.linearRampToValueAtTime(1, t0 + e + PACING.duckRampOut);
     }
+    g.setValueAtTime(PACING.duckGain, t0 + e);
+    g.linearRampToValueAtTime(1, t0 + e + PACING.duckRampOut);
+    this.duckEnd = e;
   }
 
   dispose() {

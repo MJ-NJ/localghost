@@ -7,7 +7,8 @@ import { direct, countSpeechWords } from "../director/director";
 import { DEFAULT_KOKORO_VOICE, KokoroWebAdapter, type KokoroProgress } from "../adapters/tts/kokoroWeb";
 import type { VoiceInfo } from "../adapters/tts/types";
 import { Effects } from "../engine/effects";
-import { Player, prepare, type PlayerState, type Prepared } from "../engine/player";
+import { Player, type PlayerState } from "../engine/player";
+import { StorySession, synthesizeInto } from "../engine/session";
 import { timing } from "../lib/timing";
 import { DebugPanel } from "./DebugPanel";
 import { ErrorView } from "./ErrorView";
@@ -66,7 +67,8 @@ export function App() {
 
   const abort = useRef<AbortController | null>(null);
   const player = useRef<Player | null>(null);
-  const prepared = useRef<Prepared | null>(null);
+  const prepared = useRef<StorySession | null>(null);
+  const [waitingVoice, setWaitingVoice] = useState(false);
   const preparedKey = useRef<string | null>(null);
   const [hudVisible, setHudVisible] = useState(true);
   const lineN = useRef(0);
@@ -84,7 +86,7 @@ export function App() {
 
   const getPlayer = () => (player.current ??= new Player(new AudioContext()));
 
-  const run = useCallback(async (p: Prepared) => {
+  const run = useCallback(async (p: StorySession) => {
     effects.current?.clear();
     await getPlayer().start(p, {
       onLine: (text, style) => setLine({ text, style, n: ++lineN.current }),
@@ -92,8 +94,10 @@ export function App() {
         if (ev.kind === "light") effects.current?.trigger(ev.mode, ev.seconds, at);
       },
       onFrame: (t) => effects.current?.update(t),
+      onWaiting: setWaitingVoice,
       onEnd: () => {
         effects.current?.clear();
+        setWaitingVoice(false);
         setPlayerState("idle");
       },
     });
@@ -151,19 +155,31 @@ export function App() {
       setPhase("summoning");
       setDraft("");
       const synthStart = performance.now();
-      const p = await prepare(segments, {
+      const session = new StorySession(segments);
+      // Synthesis continues in the background while the story plays (streaming playback).
+      const synth = synthesizeInto(session, {
         adapter,
         voice,
         signal: ac.signal,
         onProgress: (d, t) => setPrerender([d, t, performance.now() - synthStart]),
       });
-      prepared.current = p;
-      preparedKey.current = source === "sample" ? `sample:${voice}` : "story";
-      setHasStory(true);
+      synth.then(
+        () => {
+          prepared.current = session; // complete: Replay / Play sample can reuse it
+          preparedKey.current = source === "sample" ? `sample:${voice}` : "story";
+          setHasStory(true);
+        },
+        (e) => {
+          if (isAbort(e)) return;
+          setError(e);
+          player.current?.stop(); // synthesis died mid-story
+        },
+      );
+      await session.ready();
+      timing.record("time to start speaking", performance.now() - synthStart);
       setPhase("idle");
       setPrerender(null);
-      setDraft("");
-      await run(p);
+      await run(session);
     } catch (e) {
       if (!isAbort(e)) setError(e);
       setPhase("idle");
@@ -343,6 +359,7 @@ export function App() {
           controls={controls}
           playerState={playerState}
         />
+        {active && waitingVoice && <div className="waiting">the voice is gathering itself…</div>}
         {active && (
           <div className={`hud ${hudVisible ? "" : "faded"}`}>
             <button aria-label={playerState === "paused" ? "Resume" : "Pause"} onClick={() => void toggle()}>
