@@ -1,0 +1,5 @@
+Can we install entire.io cli and its session for this specific project ?
+
+---
+
+Enable it on this project, and share the old history as well
