@@ -15,7 +15,22 @@ export interface KokoroStatus {
 }
 
 /** Kokoro's `speed` per style. Whisper/trembling/shout are emulated in the audio graph (M2/M5), not here. */
-const SPEED: Partial<Record<Style, number>> = { slow: 0.8 };
+const BASE_SPEED = 0.92; // narration reads less rushed than Kokoro's default 1.0 (ADR-010)
+const SPEED: Partial<Record<Style, number>> = { slow: 0.78 };
+
+/**
+ * Kokoro pads every clip with silence of unpredictable length, which makes pacing
+ * sound mechanical. Trim it so the timeline controls all gaps (ADR-010).
+ */
+export function trimSilence(x: Float32Array, sampleRate: number, threshold = 0.004, keepMs = 40): Float32Array {
+  let a = 0;
+  let b = x.length;
+  while (a < b && Math.abs(x[a]) < threshold) a++;
+  while (b > a && Math.abs(x[b - 1]) < threshold) b--;
+  if (a >= b) return x; // all quiet: leave untouched
+  const keep = Math.floor((sampleRate * keepMs) / 1000);
+  return x.subarray(Math.max(0, a - keep), Math.min(x.length, b + keep));
+}
 
 /** Provisional default; chosen from the voice list by grade, not by ear. Verify by listening. */
 export const DEFAULT_KOKORO_VOICE = "bm_george";
@@ -109,9 +124,10 @@ export class KokoroWebAdapter implements TTSAdapter {
       id,
       text: seg.text,
       voice: seg.voice,
-      speed: SPEED[seg.style] ?? 1,
+      speed: SPEED[seg.style] ?? BASE_SPEED,
     } satisfies WorkerRequest);
-    const { samples, sampleRate } = await result;
+    const { samples: raw, sampleRate } = await result;
+    const samples = trimSilence(raw, sampleRate);
     const buf = new AudioBuffer({ length: samples.length, sampleRate, numberOfChannels: 1 });
     buf.copyToChannel(samples as Float32Array<ArrayBuffer>, 0);
     return buf;

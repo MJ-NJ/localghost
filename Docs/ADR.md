@@ -43,7 +43,8 @@ All of these change what is spoken, so they are listed explicitly (code: `cue/pa
 - **Trade-off:** "Mr. Hale" becomes two segments with a seam in prosody. Fine for prose written for the ear. Over-long sentences are hard-split at `, ` / `; ` / space to respect `maxChars`.
 - **Kokoro:** `targetChars: 0` (one sentence per segment) as per plan; ElevenLabs will use ≤350.
 
-## ADR-005 Kokoro device/dtype: WebGPU→fp32, WASM→q8 (Provisional, M1)
+## ADR-005 Kokoro device/dtype: WebGPU fp32, WASM q8 (Superseded 2026-10-29)
+> **Superseded:** WebGPU fp32 confirmed as the cause of the noise (WASM q8 is clean). The app is now WASM q8 only; see `Docs/IMPROVEMENTS.md`.
 - **Context:** Plan says "q8 weights". kokoro-js README recommends fp32 when using WebGPU.
 - **Decision:** try WebGPU+fp32, fall back to WASM+q8 on load failure. User can force a device in Settings (persisted in `localStorage.kokoroDevice`).
 - **Known problem (2026-10-29):** on the dev laptop, WebGPU/fp32 playback is only sparking/crackling noise for **every** voice. A Node CPU+q8 run of the same pipeline produced clean speech statistics (no NaN, RMS 0.086, peak 0.47, zero-crossing rate 0.167), so the model, voice files and our `RawAudio → AudioBuffer` handling are fine; the suspect is WebGPU numerical output (driver / onnxruntime-web dev build `1.22.0-dev.20250409`, AMD iGPU).
@@ -65,3 +66,34 @@ All of these change what is spoken, so they are listed explicitly (code: `cue/pa
 
 ## ADR-009 Audio created via `new AudioBuffer()` from worker Float32Array (Accepted, M1)
 - Worker transfers the `Float32Array` buffer (zero-copy). Adapter builds a mono `AudioBuffer` at the sample rate reported by the library (24000 Hz). Verified field names (`audio`, `sampling_rate`) against `@huggingface/transformers@3.8.1`.
+
+## ADR-010 Voice naturalness: pacing, silence trim, baseline speed (Provisional, M2)
+User feedback after M1: voice "robotic", pauses "like a paragraph reading". Probable causes and what was changed (all ear-tuned guesses; not yet verified by listening):
+
+| Change | Value | Where | Rationale / risk |
+|---|---|---|---|
+| Silence after every speech segment | **0.45 s** (`PACING.speechGap`) | `engine/timeline.ts` | M1 played sentences back-to-back with zero gap. Too long = halting, too short = rushed. |
+| Trim Kokoro leading/trailing silence | threshold **0.004**, keep **40 ms** | `adapters/tts/kokoroWeb.ts` `trimSilence` | Kokoro pads clips unpredictably, so gaps varied. Risk: clipping a soft start/end of a whispered word. |
+| Baseline speed | **0.92** (was 1.0); `slow` **0.78** (was 0.8) | `kokoroWeb.ts` | Slower narration. Risk: very low speeds can sound drawn-out or artifacty in Kokoro. |
+| Room reverb on voice | wet **0.22**, IR 2.5 s decaying noise | `engine/audioGraph.ts` | Dry TTS sounds flat. Risk: muddy at high wet levels. |
+
+- Still not addressed (inherent to Kokoro q8 + one-sentence segments): flat prosody across sentences. Options if still robotic: merge 2-3 sentences per segment (`targetChars`), try other voices, whisper/shout emulation (M5), or a higher-quality engine (ElevenLabs, M5).
+- **Debug/tune:** all constants are in `PACING` and `kokoroWeb.ts`.
+
+## ADR-011 Non-verbals occupy fixed timeline time and are procedural noise (Provisional, M2)
+- `[breath] [sigh] [gasp] [laugh]` take 0.9 / 1.3 / 0.6 / 1.1 s and play band-passed-noise sounds (`engine/sfx.ts`). They are crude stand-ins (laugh especially); Kokoro has no native non-verbals. ElevenLabs will use native tags in M5.
+
+## ADR-012 Heartbeat is three lub-dub cycles; `[light pulse]` is not yet synced to it (Provisional, M2)
+- Plan says "two thumps"; one lub-dub is barely audible so three cycles (about 2.8 s) are played. `pulse` runs a fixed 1.2 s vignette cycle; syncing to heartbeat timing is deferred.
+
+## ADR-013 Reduce-flashing behaviour (Provisional, M2)
+- `flicker` -> single 2.5 s slow dim (max 0.45 opacity). `blackout N` -> dim (max 0.85, not black), 1.5 s fade in, N s hold, 1.5 s fade out. `red` is already slow (1.5 s ramps) and unchanged. `pulse` period 1.2 s (< 3 luminance changes/s) in both modes.
+- Plan says "blackout -> 1.5 s fade"; I interpreted that as both fades and a dimmed (not fully black) hold. Revisit if too strong or weak.
+
+## ADR-014 Timeline rules (Accepted, M2)
+- Speech advances the cursor by buffer duration + gap; pause by N; non-verbal by fixed time; sfx/light/photo/ambient are stamped at the cursor and take **no time**, so `[sfx knock]` directly before a line overlaps that line (intended). Story end = last event + 0.6 s tail, extended to cover an `[ambient stop]` 3 s fade.
+- Ducking: ambient bus to 0.5 gain (~-6 dB) during speech, merged across gaps < 1 s so the bed doesn't pump between sentences. Ramps 0.25 s in, 0.6 s out.
+- Pause uses `AudioContext.suspend()`; effects and transcript read the same clock, so they freeze with it. Hidden tabs throttle rAF, so visual events can fire late (audio is unaffected).
+
+## ADR-015 Space key handling (Accepted, M2)
+- Space toggles pause globally except inside input/select/textarea; `keyup` default is also prevented so a focused button isn't "clicked" as well.

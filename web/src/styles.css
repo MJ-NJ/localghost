@@ -104,3 +104,22 @@ button.primary { border-color: var(--accent); color: var(--accent); }
 .debug dt { color: var(--text-dim); }
 .debug dd { margin: 0 0 0.4rem; }
 .progress { width: 100%; }
+
+.stage { position: relative; overflow: hidden; }
+.stage > :not(.fx) { position: relative; z-index: 1; }
+.stage .line { animation: line-in 1.2s ease-out both; }
+@keyframes line-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .stage .line { animation: none; } }
+.stage .notice { max-width: 46ch; color: var(--text-dim); }
+
+.fx { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+.fx > div { position: absolute; inset: 0; opacity: 0; }
+.fx-black { background: #000; }
+.fx-red {
+  background: radial-gradient(ellipse at center, rgba(138, 15, 15, 0.25) 30%, rgba(138, 15, 15, 0.85) 100%);
+  mix-blend-mode: screen;
+}
+.fx-vignette { background: radial-gradient(ellipse at center, transparent 45%, rgba(0, 0, 0, 0.9) 100%); }
+
+.drawer .check { flex-direction: row; align-items: center; gap: 0.5rem; }
+.drawer .check input { padding: 0; }
