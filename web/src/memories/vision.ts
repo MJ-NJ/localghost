@@ -181,7 +181,9 @@ export async function analysePhotos(adapter: LLMAdapter, photos: VisionPhoto[], 
       }
       stop();
       inv ??= { description: lastText.trim() };
-      if (isStructured(inv) || (inv as FreeformInventory).description) await o.cache.set(photo.hash, inv);
+      // only a valid inventory is cached: a free-form fallback means the analysis failed, and caching it would
+      // pin the photo to a poor result with no way to retry
+      if (isStructured(inv)) await o.cache.set(photo.hash, inv);
     }
     if (isStructured(inv) || (inv as FreeformInventory).description) inventories[photo.id] = inv;
     o.onProgress?.(++done, photos.length);

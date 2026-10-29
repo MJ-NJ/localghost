@@ -2,22 +2,37 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CueParser } from "../cue/parser";
 import { segment } from "../cue/segmenter";
 import type { Style } from "../cue/spec";
-import { OpenAICompatAdapter } from "../adapters/llm/openaiCompat";
+import { OpenAICompatAdapter, hostOf } from "../adapters/llm/openaiCompat";
 import { direct, countSpeechWords } from "../director/director";
 import { DEFAULT_KOKORO_VOICE, KokoroWebAdapter, type KokoroProgress } from "../adapters/tts/kokoroWeb";
 import type { VoiceInfo } from "../adapters/tts/types";
 import { Effects } from "../engine/effects";
+import { PhotoReveal } from "../engine/photoReveal";
+import { analysePhotos } from "../memories/vision";
+import {
+  addPhoto,
+  getInventory,
+  getNotes,
+  listPhotos,
+  photoDataUrl,
+  removePhoto,
+  setInventory,
+  setNotes,
+  type PhotoId,
+  type StoredPhoto,
+} from "../memories/store";
 import { Player, type PlayerState } from "../engine/player";
 import { StorySession, synthesizeInto } from "../engine/session";
 import { timing } from "../lib/timing";
 import { DebugPanel } from "./DebugPanel";
 import { ErrorView } from "./ErrorView";
+import { MemoriesPanel } from "./MemoriesPanel";
 import { SettingsPanel } from "./SettingsPanel";
 import { loadLLMSettings, saveLLMSettings, type LLMSettings } from "./settings";
 import { Stage } from "./Stage";
 
 type DrawerTab = "settings" | "memories" | "debug";
-type Phase = "idle" | "loading" | "writing" | "summoning";
+type Phase = "idle" | "loading" | "looking" | "writing" | "summoning";
 type Source = "sample" | "story";
 
 const readFlag = (key: string) => {
@@ -56,11 +71,20 @@ export function App() {
   const [pendingSource, setPendingSource] = useState<Source | null>(null);
   const [device, setDevice] = useState("");
   const [reduceFlashing, setReduceFlashing] = useState(() => readFlag("reduceFlashing"));
-    const [hasStory, setHasStory] = useState(false);
+  const [hasStory, setHasStory] = useState(false);
+  const [photos, setPhotos] = useState<StoredPhoto[]>([]);
+  const [notes, setNotesState] = useState("");
+  const [memError, setMemError] = useState("");
+  const [vision, setVision] = useState<[number, number] | null>(null);
+  const [notice, setNotice] = useState("");
 
   const fxBlack = useRef<HTMLDivElement>(null);
   const fxRed = useRef<HTMLDivElement>(null);
   const fxVignette = useRef<HTMLDivElement>(null);
+  const revealCanvas = useRef<HTMLCanvasElement>(null);
+  const reveal = useRef<PhotoReveal | null>(null);
+  const revealImages = useRef(new Map<string, ImageBitmap>());
+  const notesTimer = useRef<number | undefined>(undefined);
   const effects = useRef<Effects | null>(null);
   const reduceRef = useRef(reduceFlashing);
   reduceRef.current = reduceFlashing;
@@ -82,7 +106,37 @@ export function App() {
         () => reduceRef.current,
       );
     }
+    if (revealCanvas.current) reveal.current = new PhotoReveal(revealCanvas.current, () => reduceRef.current);
   }, []);
+
+  useEffect(() => {
+    void listPhotos().then(setPhotos).catch(() => {});
+    void getNotes().then(setNotesState).catch(() => {});
+  }, []);
+
+  async function addFiles(files: File[]) {
+    setMemError("");
+    for (const f of files) {
+      try {
+        await addPhoto(f);
+      } catch (e) {
+        setMemError(e instanceof Error ? e.message : String(e));
+        break;
+      }
+    }
+    setPhotos(await listPhotos());
+  }
+
+  async function dropPhoto(id: PhotoId) {
+    await removePhoto(id);
+    setPhotos(await listPhotos());
+  }
+
+  function changeNotes(v: string) {
+    setNotesState(v);
+    window.clearTimeout(notesTimer.current);
+    notesTimer.current = window.setTimeout(() => void setNotes(v).catch(() => {}), 400);
+  }
 
   const getPlayer = () => (player.current ??= new Player(new AudioContext()));
 
@@ -92,11 +146,19 @@ export function App() {
       onLine: (text, style) => setLine({ text, style, n: ++lineN.current }),
       onVisual: (ev, at) => {
         if (ev.kind === "light") effects.current?.trigger(ev.mode, ev.seconds, at);
+        else {
+          const img = revealImages.current.get(ev.id);
+          if (img) reveal.current?.show(img, at); // an unknown id (no such photo) is ignored
+        }
       },
-      onFrame: (t) => effects.current?.update(t),
+      onFrame: (t) => {
+        effects.current?.update(t);
+        reveal.current?.update(t);
+      },
       onWaiting: setWaitingVoice,
       onEnd: () => {
         effects.current?.clear();
+        reveal.current?.clear();
         setWaitingVoice(false);
         setPlayerState("idle");
       },
@@ -135,12 +197,47 @@ export function App() {
         if (stats.unknownTags) timing.count("unknown tags dropped", stats.unknownTags);
         segments = segment(events, { maxChars: adapter.caps.maxChars, targetChars: 0 });
       } else {
-        setPhase("writing");
-        const voiceLoad = ensureModel(); // load the voice while the model writes
+        setNotice("");
+        const llmAdapter = new OpenAICompatAdapter(llm);
+        const voiceLoad = ensureModel(); // load the voice while the model works
         voiceLoad.catch(() => {}); // surfaced below if it is still failing when we need it
+
+        // Vision pass: one call per photo, cached by photo hash, so unchanged photos cost nothing.
+        let inventory: string | undefined;
+        let bestPhotoId: PhotoId | undefined;
+        revealImages.current.forEach((b) => b.close());
+        revealImages.current.clear();
+        if (photos.length) {
+          setPhase("looking");
+          const v = await analysePhotos(
+            llmAdapter,
+            await Promise.all(photos.map(async (p) => ({ id: p.id, hash: p.hash, dataUrl: await photoDataUrl(p) }))),
+            {
+              cache: { get: getInventory, set: setInventory },
+              signal: ac.signal,
+              onProgress: (d, t) => setVision([d, t]),
+            },
+          );
+          setVision(null);
+          if (v.unsupported) {
+            const msg = "This model could not read your photos, so the story uses your notes only.";
+            setNotice(msg);
+            timing.note(msg);
+          } else if (Object.keys(v.inventories).length) {
+            inventory = JSON.stringify(v.inventories);
+            bestPhotoId = v.bestId;
+            const best = photos.find((p) => p.id === bestPhotoId);
+            if (best) revealImages.current.set(best.id, await createImageBitmap(best.blob));
+          }
+        }
+
+        setPhase("writing");
         const result = await direct({
-          adapter: new OpenAICompatAdapter(llm),
+          adapter: llmAdapter,
           level,
+          inventory,
+          notes,
+          bestPhotoId,
           signal: ac.signal,
           onText: (d) => setDraft((t) => t + d),
         });
@@ -279,7 +376,9 @@ export function App() {
   const pct = progress && progress.total ? Math.round((progress.loaded / progress.total) * 100) : null;
 
   const hint =
-    phase === "writing" ? (
+    phase === "looking" ? (
+      <>Studying your place{vision ? ` — photo ${Math.min(vision[0] + 1, vision[1])} of ${vision[1]}` : "…"}</>
+    ) : phase === "writing" ? (
       "Summoning…"
     ) : phase === "loading" ? (
       <>
@@ -355,6 +454,8 @@ export function App() {
           line={line}
           hint={hint}
           draft={draft}
+          notice={notice}
+          revealCanvas={revealCanvas}
           error={error != null ? <ErrorView error={error} /> : null}
           controls={controls}
           playerState={playerState}
@@ -399,7 +500,18 @@ export function App() {
                 }}
               />
             )}
-            {tab === "memories" && <div className="hint">Coming in M4.</div>}
+            {tab === "memories" && (
+              <MemoriesPanel
+                photos={photos}
+                notes={notes}
+                host={hostOf(llm.baseUrl)}
+                locked={busy || active}
+                error={memError}
+                onAdd={(f) => void addFiles(f)}
+                onRemove={(id) => void dropPhoto(id)}
+                onNotes={changeNotes}
+              />
+            )}
             {tab === "debug" && <DebugPanel />}
           </div>
         </aside>

@@ -11,6 +11,9 @@ export interface StageProps {
   error: ReactNode;
   /** Raw streamed LLM text while the story is being written. */
   draft: string;
+  /** A plain message shown above the controls (e.g. "photos were skipped"). */
+  notice: string;
+  revealCanvas: RefObject<HTMLCanvasElement | null>;
   controls: ReactNode;
   playerState: PlayerState;
 }
@@ -25,9 +28,11 @@ export function Stage(p: StageProps) {
         </div>
       )}
       {p.draft && <div className="draft">{p.draft.replace(/\[[^\]]*\]?/g, "").trim().slice(-500)}</div>}
+      {p.notice && <div className="hint">{p.notice}</div>}
       {p.error && <div className="hint">{p.error}</div>}
       <div className="controls">{p.controls}</div>
       <div className="fx">
+        <canvas className="fx-photo" ref={p.revealCanvas} />
         <div className="fx-black" ref={p.fxBlack} />
         <div className="fx-red" ref={p.fxRed} />
         <div className="fx-vignette" ref={p.fxVignette} />

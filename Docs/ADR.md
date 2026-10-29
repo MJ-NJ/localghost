@@ -140,3 +140,17 @@ User feedback after M1: voice "robotic", pauses "like a paragraph reading". Prob
 - **Replay / Play sample reuse** apply only once synthesis has completed; stopping mid-synthesis aborts it and nothing is cached.
 - **Ducking when merged:** when a new segment arrives after the release ramp has started, the planned release is cancelled and re-planned, which can nudge ambient gain by a small step (ambient is quiet, so likely inaudible).
 - **Metrics:** `time to start speaking` and `prerender total` are in the Debug tab.
+
+## ADR-023 Vision pass behaviour (Provisional, M4)
+- **When:** at "Tell me a story" time, not on upload, so adding photos is instant. Photos are analysed one at a time (CPU-bound), before the story is written. The voice model loads in parallel, so the two compete for CPU while it does.
+- **Cache:** inventories are keyed by the sha-256 of the downscaled JPEG, so the same pixels in a different slot are not re-analysed. **Only valid structured inventories are cached.** A free-form fallback is not, so a failed analysis is retried next time instead of being pinned.
+- **Validation (`validateInventory`):** strict on the essentials (a `place` and at least one named object), lenient on the rest (missing arrays become empty, more than 12 objects are truncated). JSON is pulled from the first balanced `{...}` in the reply, so code fences and chatter are tolerated. Invalid output is retried once, then the raw text is kept as `{ "description": ... }` for that story only.
+- **What the story model receives:** `{"room_1": <inventory>, "room_2": <inventory>}` as one JSON string in the LISTENER'S PLACE section. Photos with a free-form description appear as `{"description": "..."}`. Notes are sent whether or not there are photos.
+- **Best photo for the reveal:** the photo with the most `unsettling_potential` items (free-form counts as 0); ties go to the lowest id. If photos exist but no inventory could be made, the reveal is **not** used, which follows the plan's "use notes only".
+- **"Model can't see" detection (`unsupported`):** any HTTP error status from the model server on an image request is treated as "no vision". Risk: a transient 500 (for example out of memory on a large model) is reported as "could not read your photos". Connection failures are not treated this way. A model that accepts images but silently ignores them cannot be detected and will produce an invented inventory.
+- **Privacy:** photos are downscaled (longest side 768 px) and re-encoded as JPEG 0.8 through a canvas, which drops EXIF. They are stored in IndexedDB only and sent only to the configured LLM endpoint as base64 data URLs.
+
+## ADR-024 Photo reveal look (Provisional, not seen by eye, M4)
+- Canvas layer over the Stage: cover-fit, scale drift 1.0 to 1.04, full desaturation (`saturation` blend), red tint at 0.28 alpha, per-frame grain at 0.22 alpha (96 px noise tile scaled up), darkened edges. Fade in 1.5 s, hold 4 s, fade out 2 s (7.5 s total, the plan's timings).
+- Glitch: two 150 ms windows at 2.0 s and 4.6 s, each shifting 3 random horizontal strips vertically by 4-12 px. **Reduce flashing skips the glitch** only; the fades are already slow. The grain still changes each frame in both modes (it is low contrast, but it is per-frame noise, so revisit if it counts as flashing for you).
+- Only the best photo is loaded for the reveal. A `[photo reveal ID]` for a photo that was not loaded is ignored.

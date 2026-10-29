@@ -123,6 +123,12 @@ describe("analysePhotos", () => {
     expect(r.unsupported).toBe(false);
   });
 
+  it("does not cache a free-form fallback, so the photo can be retried", async () => {
+    const cache = memCache();
+    await analysePhotos(fake(["vague", "vague"]), [photo("room_1", "h9")], { cache });
+    expect(cache.map.has("h9")).toBe(false);
+  });
+
   it("never re-analyses a photo with the same hash", async () => {
     const cache = memCache();
     const a = fake([GOOD]);
