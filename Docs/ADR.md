@@ -97,3 +97,7 @@ User feedback after M1: voice "robotic", pauses "like a paragraph reading". Prob
 
 ## ADR-015 Space key handling (Accepted, M2)
 - Space toggles pause globally except inside input/select/textarea; `keyup` default is also prevented so a focused button isn't "clicked" as well.
+
+## ADR-016 Immersive playback UI and sample reuse (Accepted, user-approved, M2)
+- While a story plays or is paused the top bar and drawer are hidden. Pause/Stop become small corner icons that fade after 3 s of inactivity and return on mouse move or key press (also on hover/focus, so they stay keyboard-reachable). Space pauses, Esc stops. Rationale: centred bordered buttons broke the mood; Stop must still be reachable for accessibility/photosensitivity.
+- **Play sample** reuses the existing synthesis when the voice is unchanged (in-memory, per page load); changing the voice re-synthesizes. This is a stopgap: the persistent audio cache is M5. Risk: if the sample script ever changes without a reload (it can't today), stale audio would play.

@@ -54,6 +54,8 @@ export function App() {
   const abort = useRef<AbortController | null>(null);
   const player = useRef<Player | null>(null);
   const prepared = useRef<Prepared | null>(null);
+  const preparedVoice = useRef<string | null>(null);
+  const [hudVisible, setHudVisible] = useState(true);
   const lineN = useRef(0);
   const adapter = useMemo(() => new KokoroWebAdapter(setProgress), []);
   useEffect(() => () => adapter.dispose(), [adapter]);
@@ -98,6 +100,10 @@ export function App() {
     abort.current = ac;
     try {
       getPlayer(); // create the AudioContext inside the user gesture
+      if (prepared.current && preparedVoice.current === voice) {
+        await run(prepared.current); // same script + voice: reuse the synthesis (M5 adds the real cache)
+        return;
+      }
       setPhase("loading");
       await ensureModel();
 
@@ -115,6 +121,7 @@ export function App() {
         onProgress: (d, t) => setPrerender([d, t]),
       });
       prepared.current = p;
+      preparedVoice.current = voice;
       setHasStory(true);
       setPhase("idle");
       setPrerender(null);
@@ -155,6 +162,10 @@ export function App() {
     setPlayerState("idle");
   };
 
+  const playerRef = player;
+  const stopRef = useRef(stop);
+  stopRef.current = stop;
+
   const toggle = useCallback(async () => {
     const p = player.current;
     if (!p) return;
@@ -167,6 +178,10 @@ export function App() {
     const ignore = (e: KeyboardEvent) =>
       e.code !== "Space" || /^(INPUT|SELECT|TEXTAREA)$/.test((e.target as HTMLElement)?.tagName ?? "");
     const down = (e: KeyboardEvent) => {
+      if (e.code === "Escape" && playerRef.current && playerRef.current.state !== "idle") {
+        stopRef.current();
+        return;
+      }
       if (ignore(e)) return;
       e.preventDefault();
       if (!e.repeat) void toggle();
@@ -184,6 +199,27 @@ export function App() {
 
   const busy = phase !== "idle";
   const active = playerState !== "idle";
+
+  // While a story plays, the HUD fades after 3 s of inactivity and returns on mouse move / key press.
+  useEffect(() => {
+    if (!active) {
+      setHudVisible(true);
+      return;
+    }
+    let t = window.setTimeout(() => setHudVisible(false), 3000);
+    const wake = () => {
+      setHudVisible(true);
+      clearTimeout(t);
+      t = window.setTimeout(() => setHudVisible(false), 3000);
+    };
+    window.addEventListener("mousemove", wake);
+    window.addEventListener("keydown", wake);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("mousemove", wake);
+      window.removeEventListener("keydown", wake);
+    };
+  }, [active]);
   const pct = progress && progress.total ? Math.round((progress.loaded / progress.total) * 100) : null;
 
   const hint =
@@ -227,14 +263,7 @@ export function App() {
     </div>
   ) : busy ? (
     <button onClick={stop}>Stop</button>
-  ) : active ? (
-    <>
-      <button className="primary" onClick={() => void toggle()}>
-        {playerState === "paused" ? "Resume" : "Pause"}
-      </button>{" "}
-      <button onClick={stop}>Stop</button>
-    </>
-  ) : (
+  ) : active ? null : (
     <>
       <button className="primary" onClick={requestPlay}>
         Play sample
@@ -244,7 +273,7 @@ export function App() {
   );
 
   return (
-    <div className="shell">
+    <div className={`shell ${active ? "immersive" : ""}`}>
       <header className="topbar">
         <h1>Localghost</h1>
         <div className="dial">
@@ -266,6 +295,16 @@ export function App() {
           controls={controls}
           playerState={playerState}
         />
+        {active && (
+          <div className={`hud ${hudVisible ? "" : "faded"}`}>
+            <button aria-label={playerState === "paused" ? "Resume" : "Pause"} onClick={() => void toggle()}>
+              {playerState === "paused" ? "▶" : "❚❚"}
+            </button>
+            <button aria-label="Stop" onClick={stop}>
+              ■
+            </button>
+          </div>
+        )}
         <aside className="drawer">
           <div className="tabs">
             {(["settings", "memories", "debug"] as const).map((t) => (

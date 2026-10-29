@@ -123,3 +123,27 @@ button.primary { border-color: var(--accent); color: var(--accent); }
 
 .drawer .check { flex-direction: row; align-items: center; gap: 0.5rem; }
 .drawer .check input { padding: 0; }
+
+/* Immersive mode while a story plays: chrome out of the way, controls fade when idle */
+.shell.immersive .topbar,
+.shell.immersive .drawer { display: none; }
+.hud {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 20;
+  display: flex;
+  gap: 0.4rem;
+  opacity: 0.55;
+  transition: opacity 0.8s ease;
+}
+.hud.faded { opacity: 0; }
+.hud:hover, .hud:focus-within { opacity: 1; }
+.hud button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-dim);
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+}
+.hud button:hover { color: var(--accent); }
