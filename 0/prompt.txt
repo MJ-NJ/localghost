@@ -1,0 +1,69 @@
+Precursor:
+- Started the application
+- Load Voice model
+- Select Heart(en-us, Female, A Grade)
+ - Play sample
+
+Observations:
+- The text and story is generated, 
+- On pressing play i only hear sparking and cracking noise
+- The same case for all the voices in the dropdown
+- Running on webgpu/fp32
+- Stops cleanly but changing the voice or stopping and playing again, starts the story from the starting
+
+Probable exploration needed to fix this cause, Explore on this.
+- The crackling noise is only coming when the model tries to speak, i had a similar issue, this generally arises if that voice model is not available on the running device's browser, even if listed by the API
+
+
+Do this parallely:
+- Use this @Docs/ADR.md  file to store all the arch decisions we took, or the decisions made that could give wrong output, so its easier to debug in long run as well as any tradeoffs with the decision.
+
+---
+
+Observations:
+- Works fine on WASM q8 -> fp32 is the culprit then
+- The voice is still very robotic, and the pauses as well. It sounds like a paragraph reading.
+
+Next Steps:
+- We can ditch the fp32 for the time being, and note it in the @Docs/IMPROVEMENTS.md  file. 
+- We can move on to M2, and parallely fix the Voice being too robotic issue. 
+
+Commit and Push the work first.
+
+---
+
+Observations:
+- I see the notice, and the button works
+- I head the droning and ducking
+- Sound effects are ok-ok, I suppose this short story doesn't tell a lot to judge if all works fine, 
+- lights are flickering, the text is going italic as well
+- Its still summons when I replay after ending, even for same voice
+- pause and play is working fine now
+- This pause play has to be moved either to the side or someplace else, its breaking the feel of a ghost story, thats bad UX.
+- Audio is still robotic, but we can tune that later.
+
+Lets discuss on this, its fix. Then move on to the next phase.
+
+---
+
+Responses:
+1. Yes I had pressed Play sample and not Replay. Replay works fine as needed
+2. Your plan seems fine for this
+3. Works fine as is
+
+I will pull the gemma model in the time being
+
+---
+
+Any sugggestions on What gemma model to use here ?, my ram configuration will allow me to run google/gemma-4-12B-it-qat-q4_0-gguf or google/gemma-4-E4B-it-qat-q4_0-gguf 
+Any other suggestions ?
+
+---
+
+And what if i were to use this one ?
+unsloth/gemma-4-E4B-it-GGUF , specifically the Q4 options 
+that push the model size to below 5gb
+
+---
+
+Yes unsloth one does suppport image-text to text
