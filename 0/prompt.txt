@@ -1,0 +1,19 @@
+Precursor:
+- Started the application
+- Load Voice model
+- Select Heart(en-us, Female, A Grade)
+ - Play sample
+
+Observations:
+- The text and story is generated, 
+- On pressing play i only hear sparking and cracking noise
+- The same case for all the voices in the dropdown
+- Running on webgpu/fp32
+- Stops cleanly but changing the voice or stopping and playing again, starts the story from the starting
+
+Probable exploration needed to fix this cause, Explore on this.
+- The crackling noise is only coming when the model tries to speak, i had a similar issue, this generally arises if that voice model is not available on the running device's browser, even if listed by the API
+
+
+Do this parallely:
+- Use this @Docs/ADR.md  file to store all the arch decisions we took, or the decisions made that could give wrong output, so its easier to debug in long run as well as any tradeoffs with the decision.

@@ -1,0 +1,42 @@
+{
+  "cli_version": "0.12.2",
+  "checkpoint_id": "01M63CNATV4D651034VTGF5G25",
+  "session_id": "50313d85-6a6b-4c95-b834-3f689cdb8eb5",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-29T08:33:14.636924Z",
+  "branch": "master",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "Docs/ADR.md",
+    "web/src/adapters/tts/kokoro.worker.ts",
+    "web/src/adapters/tts/kokoroWeb.ts",
+    "web/src/app/App.tsx",
+    "web/src/app/DebugPanel.tsx",
+    "web/src/lib/timing.ts"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "1f40b3a76291",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 52,
+    "cache_creation_tokens": 169496,
+    "cache_read_tokens": 1970483,
+    "output_tokens": 46779,
+    "api_call_count": 26
+  },
+  "redaction": {
+    "replacements": 0,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 0,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  }
+}
