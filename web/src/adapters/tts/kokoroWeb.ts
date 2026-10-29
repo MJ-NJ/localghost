@@ -12,6 +12,8 @@ export interface KokoroStatus {
   device: "webgpu" | "wasm";
   dtype: string;
   loadMs: number;
+  /** crossOriginIsolated: WASM can use multiple threads only when true. */
+  isolated: boolean;
 }
 
 /** Kokoro's `speed` per style. Whisper/trembling/shout are emulated in the audio graph (M2/M5), not here. */
@@ -76,7 +78,7 @@ export class KokoroWebAdapter implements TTSAdapter {
           this.onProgress?.({ file: m.file, loaded: m.loaded, total: m.total });
         } else if (m.type === "ready") {
           this.voices = m.voices.map((v) => ({ id: v.id, label: `${v.name} (${v.language}, ${v.gender}, grade ${v.grade})` }));
-          this.status = { device: m.device, dtype: m.dtype, loadMs: m.loadMs };
+          this.status = { device: m.device, dtype: m.dtype, loadMs: m.loadMs, isolated: m.isolated };
           timing.record(`kokoro load (${m.device}/${m.dtype})`, m.loadMs);
           resolve();
         } else if (m.type === "audio") {

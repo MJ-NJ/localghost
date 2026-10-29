@@ -154,3 +154,7 @@ button.primary { border-color: var(--accent); color: var(--accent); }
 .error .cmd small { flex-basis: 100%; color: var(--text-dim); }
 .error code { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.2rem 0.4rem; color: var(--text); word-break: break-all; }
 .drawer h3 { margin: 0.4rem 0 0; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); }
+
+/* Stage can scroll when content (errors, notices) is taller than the window */
+.stage { overflow-y: auto; justify-content: safe center; }
+.stage .draft { max-height: 40vh; overflow: hidden; }

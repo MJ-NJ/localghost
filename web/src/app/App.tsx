@@ -34,13 +34,18 @@ const writeFlag = (key: string, on: boolean) => {
   }
 };
 
+const formatEta = (ms: number) => {
+  const s = Math.max(1, Math.round(ms / 1000));
+  return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
+};
+
 export function App() {
   const [level, setLevel] = useState(3);
   const [tab, setTab] = useState<DrawerTab>("settings");
   const [phase, setPhase] = useState<Phase>("idle");
   const [playerState, setPlayerState] = useState<PlayerState>("idle");
   const [progress, setProgress] = useState<KokoroProgress | null>(null);
-  const [prerender, setPrerender] = useState<[number, number] | null>(null);
+  const [prerender, setPrerender] = useState<[number, number, number] | null>(null); // done, total, elapsed ms
   const [line, setLine] = useState<{ text: string; style: Style; n: number } | null>(null);
   const [voices, setVoices] = useState<VoiceInfo[]>([]);
   const [voice, setVoice] = useState(DEFAULT_KOKORO_VOICE);
@@ -98,7 +103,7 @@ export function App() {
   async function ensureModel() {
     await adapter.load();
     setVoices(adapter.voices);
-    if (adapter.status) setDevice(`${adapter.status.device}/${adapter.status.dtype}`);
+    if (adapter.status) setDevice(`${adapter.status.device}/${adapter.status.dtype}, ${adapter.status.isolated ? "multi-threaded" : "single-threaded (not cross-origin isolated)"}`);
   }
 
   const isAbort = (e: unknown) => e instanceof DOMException && e.name === "AbortError";
@@ -144,11 +149,13 @@ export function App() {
       }
 
       setPhase("summoning");
+      setDraft("");
+      const synthStart = performance.now();
       const p = await prepare(segments, {
         adapter,
         voice,
         signal: ac.signal,
-        onProgress: (d, t) => setPrerender([d, t]),
+        onProgress: (d, t) => setPrerender([d, t, performance.now() - synthStart]),
       });
       prepared.current = p;
       preparedKey.current = source === "sample" ? `sample:${voice}` : "story";
@@ -266,6 +273,9 @@ export function App() {
     ) : phase === "summoning" && prerender ? (
       <>
         Summoning… {prerender[0]}/{prerender[1]}
+        {prerender[0] > 0 && (
+          <div>about {formatEta((prerender[2] / prerender[0]) * (prerender[1] - prerender[0]))} left</div>
+        )}
       </>
     ) : !line && !active ? (
       "The Stage. Nothing is summoned yet."

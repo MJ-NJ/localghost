@@ -36,7 +36,7 @@ function analyse(x: Float32Array): AudioStats {
 
 export type WorkerResponse =
   | { type: "progress"; file: string; loaded: number; total: number; status: string }
-  | { type: "ready"; device: "webgpu" | "wasm"; dtype: string; voices: WorkerVoice[]; loadMs: number }
+  | { type: "ready"; device: "webgpu" | "wasm"; dtype: string; voices: WorkerVoice[]; loadMs: number; isolated: boolean }
   | { type: "audio"; id: number; samples: Float32Array; sampleRate: number; ms: number; stats: AudioStats }
   | { type: "error"; id?: number; message: string };
 
@@ -64,7 +64,7 @@ async function load() {
     gender: v.gender,
     grade: v.overallGrade,
   }));
-  post({ type: "ready", device, dtype, voices, loadMs: performance.now() - t0 });
+  post({ type: "ready", device, dtype, voices, loadMs: performance.now() - t0, isolated: self.crossOriginIsolated });
 }
 
 async function synth(id: number, text: string, voice: string, speed: number) {

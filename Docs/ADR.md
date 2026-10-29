@@ -123,3 +123,10 @@ User feedback after M1: voice "robotic", pauses "like a paragraph reading". Prob
 - API key and LLM settings are stored in `localStorage` (plain text, as the plan says) and sent only to the configured base URL.
 - Connection failure to a local host shows the `OLLAMA_ORIGINS` explanation with copyable commands. For a non-local host it shows a generic network/CORS message.
 - The voice model loads **in parallel** with story generation to hide its load time.
+
+## ADR-021 Cross-origin isolation for multi-threaded Kokoro (Provisional, M3 follow-up)
+- **Finding (2026-10-30):** a level-1 story (~75 sentences) sat at 24/75 while "Summoning". The LLM had already finished (its text was on screen); the bottleneck is Kokoro synthesis. onnxruntime-web uses **1 WASM thread** unless the page is cross-origin isolated; isolated, it uses `min(4, ceil(cores/2))` (4 on the dev laptop). We were not sending the headers.
+- **Decision:** Vite dev and preview servers send `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: credentialless` (`vite.config.ts`). `credentialless` rather than `require-corp` so Google Fonts and Hugging Face model downloads keep working without CORP headers.
+- **Risks:** (1) unverified that the model download and Ollama calls still work under isolation (CORS requests should, but test); (2) `credentialless` is not supported in Safari, where it silently stays single-threaded; (3) **the hosted site needs the same two headers** (Render static site: add them under Headers in the dashboard or `render.yaml`) or the deployed version stays slow. Add to the M6 checklist.
+- **Diagnostic:** Settings shows "multi-threaded" or "single-threaded (not cross-origin isolated)" next to the device. The prerender screen now shows an estimated time left.
+- **Not yet done:** streaming playback (speak while still synthesizing, a [SHOULD] item) and merging sentences into larger segments. Both are options if this is still too slow.
