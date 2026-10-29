@@ -87,7 +87,7 @@ export class OpenAICompatAdapter implements LLMAdapter {
     }
     if (!res.ok) {
       const detail = (await res.text().catch(() => "")).slice(0, 300);
-      throw new LLMError(`The model server returned ${res.status}${detail ? `: ${detail}` : ""}`);
+      throw new LLMError(`The model server returned ${res.status}${detail ? `: ${detail}` : ""}`, [], res.status);
     }
     if (!res.body) throw new LLMError("The model server sent no response body.");
 

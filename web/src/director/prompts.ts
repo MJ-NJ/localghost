@@ -77,3 +77,18 @@ ${tagReference(p)}
 EXAMPLE STYLE (do not reuse its content):
 ${example(p)}`;
 }
+
+/** Vision pass system prompt (verbatim from PLAN.md, M4). */
+export const VISION_PROMPT = `You are a set designer for a horror radio play. You will see one photo of a real place from the listener's life.
+Describe only what is physically visible, concretely, as material for a story set in this exact place.
+Never identify anyone or describe a person's face, age, body or identity. If a person is visible, write only "a person" and where they are.
+Return ONLY JSON:
+{
+  "place": string,
+  "time_of_day": string,
+  "lighting": string,
+  "objects": [{ "name": string, "where": string, "detail": string }],
+  "textures_and_sounds": string[],
+  "unsettling_potential": string[]
+}
+"objects": 5–12 items. "unsettling_potential": 3–5 small real details that could turn eerie (a door ajar, a coat on a hook, a dark window).`;

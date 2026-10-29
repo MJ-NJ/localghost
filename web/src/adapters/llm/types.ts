@@ -32,6 +32,8 @@ export class LLMError extends Error {
   constructor(
     message: string,
     readonly commands: { label: string; command: string }[] = [],
+    /** HTTP status when the server answered with an error; undefined for connection failures. */
+    readonly status?: number,
   ) {
     super(message);
     this.name = "LLMError";
