@@ -1,5 +1,5 @@
 import type { Style, TTSAdapter, VoiceInfo } from "./types";
-import type { DevicePref, WorkerRequest, WorkerResponse } from "./kokoro.worker";
+import type { WorkerRequest, WorkerResponse } from "./kokoro.worker";
 import { timing } from "../../lib/timing";
 
 export interface KokoroProgress {
@@ -39,10 +39,7 @@ export class KokoroWebAdapter implements TTSAdapter {
   private nextId = 1;
   private pending = new Map<number, { resolve: (r: { samples: Float32Array; sampleRate: number }) => void; reject: (e: Error) => void }>();
 
-  constructor(
-    private readonly onProgress?: (p: KokoroProgress) => void,
-    private readonly device: DevicePref = "auto",
-  ) {}
+  constructor(private readonly onProgress?: (p: KokoroProgress) => void) {}
 
   dispose() {
     this.worker?.terminate();
@@ -88,7 +85,7 @@ export class KokoroWebAdapter implements TTSAdapter {
         this.loading = null;
         reject(new Error(e.message || "Kokoro worker failed to start"));
       };
-      worker.postMessage({ type: "load", device: this.device } satisfies WorkerRequest);
+      worker.postMessage({ type: "load" } satisfies WorkerRequest);
     });
     return this.loading;
   }

@@ -9,10 +9,8 @@ export interface WorkerVoice {
   grade: string;
 }
 
-export type DevicePref = "auto" | "webgpu" | "wasm";
-
 export type WorkerRequest =
-  | { type: "load"; device: DevicePref }
+  | { type: "load" }
   | { type: "synth"; id: number; text: string; voice: string; speed: number };
 
 export interface AudioStats {
@@ -48,34 +46,16 @@ let tts: KokoroTTS | null = null;
 const post = (msg: WorkerResponse, transfer: Transferable[] = []) =>
   (self as unknown as Worker).postMessage(msg, transfer);
 
-async function hasWebGpu(): Promise<boolean> {
-  try {
-    const gpu = (navigator as unknown as { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
-    return !!gpu && !!(await gpu.requestAdapter());
-  } catch {
-    return false;
-  }
-}
-
-async function load(pref: DevicePref) {
+async function load() {
   const t0 = performance.now();
   const progress_callback = (p: { status: string; file?: string; loaded?: number; total?: number }) => {
     if (p.file) post({ type: "progress", status: p.status, file: p.file, loaded: p.loaded ?? 0, total: p.total ?? 0 });
   };
 
-  let device: "webgpu" | "wasm" = "wasm";
-  let dtype: "fp32" | "q8" = "q8";
-  // kokoro-js recommends fp32 on WebGPU; q8 is for WASM.
-  if (pref !== "wasm" && (await hasWebGpu())) {
-    try {
-      tts = await KokoroTTS.from_pretrained(MODEL_ID, { dtype: "fp32", device: "webgpu", progress_callback });
-      device = "webgpu";
-      dtype = "fp32";
-    } catch (e) {
-      console.warn("kokoro: WebGPU load failed, falling back to WASM", e);
-    }
-  }
-  if (!tts) tts = await KokoroTTS.from_pretrained(MODEL_ID, { dtype: "q8", device: "wasm", progress_callback });
+  // WASM + q8 only. WebGPU + fp32 produced pure noise on the dev laptop (see Docs/IMPROVEMENTS.md).
+  const device = "wasm" as const;
+  const dtype = "q8" as const;
+  tts = await KokoroTTS.from_pretrained(MODEL_ID, { dtype, device, progress_callback });
 
   const voices = Object.entries(tts.voices).map(([id, v]) => ({
     id,
@@ -99,7 +79,7 @@ async function synth(id: number, text: string, voice: string, speed: number) {
 self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
   const msg = e.data;
   try {
-    if (msg.type === "load") await load(msg.device);
+    if (msg.type === "load") await load();
     else if (msg.type === "synth") await synth(msg.id, msg.text, msg.voice, msg.speed);
   } catch (err) {
     post({ type: "error", id: msg.type === "synth" ? msg.id : undefined, message: String(err instanceof Error ? err.message : err) });
