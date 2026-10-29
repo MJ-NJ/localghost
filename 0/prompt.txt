@@ -1,0 +1,4 @@
+Read CLAUDE.md and PLAN.md fully. Then execute M0 and M1 only.
+Commit after each task. At the end of M1, run tests and typecheck,
+summarize what changed and what I should test by hand, and stop. Also note, for decisions which could give wrong results, do ask to review that before making any changes, because fixing errors is easy, but fixing wrong output is not.
+Don't build anything not in PLAN.md, and ask before adding a dependency.
