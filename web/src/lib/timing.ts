@@ -9,6 +9,7 @@ type Listener = () => void;
 
 const entries: TimingEntry[] = [];
 const counters = new Map<string, number>();
+const notes: string[] = [];
 const listeners = new Set<Listener>();
 let version = 0;
 
@@ -31,6 +32,12 @@ export const timing = {
       return ms;
     };
   },
+  /** Free-text diagnostic line shown in the DebugPanel. */
+  note(text: string) {
+    notes.push(text);
+    emit();
+  },
+  notes: (): readonly string[] => notes,
   count(name: string, by = 1) {
     counters.set(name, (counters.get(name) ?? 0) + by);
     emit();
@@ -40,6 +47,7 @@ export const timing = {
   reset() {
     entries.length = 0;
     counters.clear();
+    notes.length = 0;
     emit();
   },
   subscribe(l: Listener) {

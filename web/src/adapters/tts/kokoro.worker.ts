@@ -9,14 +9,37 @@ export interface WorkerVoice {
   grade: string;
 }
 
+export type DevicePref = "auto" | "webgpu" | "wasm";
+
 export type WorkerRequest =
-  | { type: "load" }
+  | { type: "load"; device: DevicePref }
   | { type: "synth"; id: number; text: string; voice: string; speed: number };
+
+export interface AudioStats {
+  samples: number;
+  nan: number;
+  peak: number;
+  rms: number;
+  /** zero-crossing rate; speech is roughly 0.02-0.2, white noise is ~0.5 */
+  zcr: number;
+}
+
+function analyse(x: Float32Array): AudioStats {
+  let nan = 0, peak = 0, sum = 0, zc = 0;
+  for (let i = 0; i < x.length; i++) {
+    const v = x[i];
+    if (!Number.isFinite(v)) { nan++; continue; }
+    peak = Math.max(peak, Math.abs(v));
+    sum += v * v;
+    if (i && x[i - 1] < 0 !== v < 0) zc++;
+  }
+  return { samples: x.length, nan, peak, rms: Math.sqrt(sum / x.length), zcr: zc / x.length };
+}
 
 export type WorkerResponse =
   | { type: "progress"; file: string; loaded: number; total: number; status: string }
   | { type: "ready"; device: "webgpu" | "wasm"; dtype: string; voices: WorkerVoice[]; loadMs: number }
-  | { type: "audio"; id: number; samples: Float32Array; sampleRate: number; ms: number }
+  | { type: "audio"; id: number; samples: Float32Array; sampleRate: number; ms: number; stats: AudioStats }
   | { type: "error"; id?: number; message: string };
 
 const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
@@ -34,7 +57,7 @@ async function hasWebGpu(): Promise<boolean> {
   }
 }
 
-async function load() {
+async function load(pref: DevicePref) {
   const t0 = performance.now();
   const progress_callback = (p: { status: string; file?: string; loaded?: number; total?: number }) => {
     if (p.file) post({ type: "progress", status: p.status, file: p.file, loaded: p.loaded ?? 0, total: p.total ?? 0 });
@@ -43,7 +66,7 @@ async function load() {
   let device: "webgpu" | "wasm" = "wasm";
   let dtype: "fp32" | "q8" = "q8";
   // kokoro-js recommends fp32 on WebGPU; q8 is for WASM.
-  if (await hasWebGpu()) {
+  if (pref !== "wasm" && (await hasWebGpu())) {
     try {
       tts = await KokoroTTS.from_pretrained(MODEL_ID, { dtype: "fp32", device: "webgpu", progress_callback });
       device = "webgpu";
@@ -69,13 +92,14 @@ async function synth(id: number, text: string, voice: string, speed: number) {
   const t0 = performance.now();
   const audio = await tts.generate(text, { voice: voice as never, speed });
   const samples = audio.audio;
-  post({ type: "audio", id, samples, sampleRate: audio.sampling_rate, ms: performance.now() - t0 }, [samples.buffer]);
+  const stats = analyse(samples);
+  post({ type: "audio", id, samples, sampleRate: audio.sampling_rate, ms: performance.now() - t0, stats }, [samples.buffer]);
 }
 
 self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
   const msg = e.data;
   try {
-    if (msg.type === "load") await load();
+    if (msg.type === "load") await load(msg.device);
     else if (msg.type === "synth") await synth(msg.id, msg.text, msg.voice, msg.speed);
   } catch (err) {
     post({ type: "error", id: msg.type === "synth" ? msg.id : undefined, message: String(err instanceof Error ? err.message : err) });

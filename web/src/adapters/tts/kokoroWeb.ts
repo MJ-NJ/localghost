@@ -1,5 +1,5 @@
 import type { Style, TTSAdapter, VoiceInfo } from "./types";
-import type { WorkerRequest, WorkerResponse } from "./kokoro.worker";
+import type { DevicePref, WorkerRequest, WorkerResponse } from "./kokoro.worker";
 import { timing } from "../../lib/timing";
 
 export interface KokoroProgress {
@@ -39,7 +39,18 @@ export class KokoroWebAdapter implements TTSAdapter {
   private nextId = 1;
   private pending = new Map<number, { resolve: (r: { samples: Float32Array; sampleRate: number }) => void; reject: (e: Error) => void }>();
 
-  constructor(private readonly onProgress?: (p: KokoroProgress) => void) {}
+  constructor(
+    private readonly onProgress?: (p: KokoroProgress) => void,
+    private readonly device: DevicePref = "auto",
+  ) {}
+
+  dispose() {
+    this.worker?.terminate();
+    this.worker = null;
+    this.loading = null;
+    this.pending.forEach((p) => p.reject(new DOMException("aborted", "AbortError")));
+    this.pending.clear();
+  }
 
   /** Load the model (idempotent). Downloads weights on first use. */
   load(): Promise<void> {
@@ -58,6 +69,8 @@ export class KokoroWebAdapter implements TTSAdapter {
           resolve();
         } else if (m.type === "audio") {
           timing.record("tts segment", m.ms);
+          const st = m.stats;
+          timing.note(`audio: ${st.samples} smp, peak ${st.peak.toFixed(2)}, rms ${st.rms.toFixed(3)}, zcr ${st.zcr.toFixed(2)}, nan ${st.nan}`);
           this.pending.get(m.id)?.resolve({ samples: m.samples, sampleRate: m.sampleRate });
           this.pending.delete(m.id);
         } else if (m.type === "error") {
@@ -75,7 +88,7 @@ export class KokoroWebAdapter implements TTSAdapter {
         this.loading = null;
         reject(new Error(e.message || "Kokoro worker failed to start"));
       };
-      worker.postMessage({ type: "load" } satisfies WorkerRequest);
+      worker.postMessage({ type: "load", device: this.device } satisfies WorkerRequest);
     });
     return this.loading;
   }

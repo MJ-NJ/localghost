@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CueParser } from "../cue/parser";
 import { segment } from "../cue/segmenter";
 import { DEFAULT_KOKORO_VOICE, KokoroWebAdapter, type KokoroProgress } from "../adapters/tts/kokoroWeb";
+import type { DevicePref } from "../adapters/tts/kokoro.worker";
 import type { VoiceInfo } from "../adapters/tts/types";
 import { playSimple } from "../engine/player";
 import { timing } from "../lib/timing";
@@ -21,10 +22,18 @@ export function App() {
   const [voice, setVoice] = useState(DEFAULT_KOKORO_VOICE);
   const [error, setError] = useState("");
   const [device, setDevice] = useState("");
+  const [devicePref, setDevicePref] = useState<DevicePref>(() => {
+    try {
+      return (localStorage.getItem("kokoroDevice") as DevicePref) || "auto";
+    } catch {
+      return "auto";
+    }
+  });
 
   const abort = useRef<AbortController | null>(null);
   const ctx = useRef<AudioContext | null>(null);
-  const adapter = useMemo(() => new KokoroWebAdapter(setProgress), []);
+  const adapter = useMemo(() => new KokoroWebAdapter(setProgress, devicePref), [devicePref]);
+  useEffect(() => () => adapter.dispose(), [adapter]);
 
   async function loadModel() {
     setError("");
@@ -134,6 +143,28 @@ export function App() {
                         {v.label}
                       </option>
                     ))}
+                  </select>
+                </label>
+                <label>
+                  Voice engine device
+                  <select
+                    value={devicePref}
+                    disabled={busy}
+                    onChange={(e) => {
+                      const v = e.target.value as DevicePref;
+                      try {
+                        localStorage.setItem("kokoroDevice", v);
+                      } catch {
+                        /* ignore */
+                      }
+                      setDevice("");
+                      setVoices([]);
+                      setDevicePref(v);
+                    }}
+                  >
+                    <option value="auto">Auto (WebGPU, else WASM)</option>
+                    <option value="webgpu">WebGPU (fp32)</option>
+                    <option value="wasm">WASM (q8)</option>
                   </select>
                 </label>
                 <button onClick={loadModel} disabled={busy}>
