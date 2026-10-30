@@ -225,3 +225,10 @@ User feedback after M1: voice "robotic", pauses "like a paragraph reading". Prob
 
 ## ADR-036 Draft default demo story (Draft, needs approval)
 - `public/sample/sample.cue.txt` is a new hand-written draft (about 250 spoken words) that uses all four voice styles, several effects, and ends on `[photo reveal sample]`. It uses generic objects (kettle, grey coat, hallway light) because the real room photo is not known yet. The reveal does nothing until Sample mode wires `sample_room.jpg` (M6). PLAN.md says the user approves the final script.
+
+## ADR-037 ElevenLabs key from `.env.local`, development only (Accepted, user-requested)
+- **How:** put `VITE_ELEVENLABS_API_KEY=...` in `web/.env.local` (git-ignored by `*.local`). `web/.env.local.example` is a committed placeholder. When the saved key in Settings is empty, the dev key is used and Settings says so.
+- **Why dev-only:** Vite inlines every `VITE_*` value into the browser bundle. A key in the deployed site's bundle can be read by anyone and spent. The read is guarded by `import.meta.env.DEV`, which is false in production builds.
+- **Verified:** a production build made with a dummy `VITE_ELEVENLABS_API_KEY` contains neither the value nor the variable name.
+- **Not persisted:** a key that came from `.env.local` is never copied into `localStorage`. A key typed into Settings still is (as the plan says), and the hosted site works the same way: each visitor enters their own key, which stays in their browser.
+- **Restart needed:** Vite reads `.env.local` at startup, so restart `npm run dev` after editing it.

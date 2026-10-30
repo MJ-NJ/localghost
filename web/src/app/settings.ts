@@ -47,12 +47,24 @@ export interface ElevenSettings {
 }
 
 const ELEVEN_KEY = "elevenSettings";
-export const DEFAULT_ELEVEN_SETTINGS: ElevenSettings = { apiKey: "", modelId: DEFAULT_ELEVEN_MODEL, voiceId: "" };
+
+/**
+ * Dev only: `web/.env.local` may set VITE_ELEVENLABS_API_KEY. Vite inlines VITE_* values into the browser bundle,
+ * so this is guarded by import.meta.env.DEV; production builds replace it with "" and the key is not shipped.
+ */
+const DEV_ELEVEN_KEY: string = import.meta.env.DEV ? ((import.meta.env.VITE_ELEVENLABS_API_KEY as string | undefined) ?? "") : "";
+export const usingDevElevenKey = (key: string) => DEV_ELEVEN_KEY !== "" && key === DEV_ELEVEN_KEY;
+
+export const DEFAULT_ELEVEN_SETTINGS: ElevenSettings = { apiKey: DEV_ELEVEN_KEY, modelId: DEFAULT_ELEVEN_MODEL, voiceId: "" };
 
 export function loadElevenSettings(): ElevenSettings {
   try {
     const raw = localStorage.getItem(ELEVEN_KEY);
-    if (raw) return { ...DEFAULT_ELEVEN_SETTINGS, ...(JSON.parse(raw) as Partial<ElevenSettings>) };
+    if (raw) {
+      const merged = { ...DEFAULT_ELEVEN_SETTINGS, ...(JSON.parse(raw) as Partial<ElevenSettings>) };
+      if (!merged.apiKey) merged.apiKey = DEV_ELEVEN_KEY;
+      return merged;
+    }
   } catch {
     /* fall back to defaults */
   }
@@ -61,7 +73,8 @@ export function loadElevenSettings(): ElevenSettings {
 
 export function saveElevenSettings(v: ElevenSettings) {
   try {
-    localStorage.setItem(ELEVEN_KEY, JSON.stringify(v));
+    // a key that came from .env.local is not copied into browser storage
+    localStorage.setItem(ELEVEN_KEY, JSON.stringify(usingDevElevenKey(v.apiKey) ? { ...v, apiKey: "" } : v));
   } catch {
     /* storage unavailable */
   }

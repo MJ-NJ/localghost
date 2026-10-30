@@ -5,7 +5,7 @@ import type { VisionSupport } from "../adapters/llm/capabilities";
 import type { VoiceInfo } from "../adapters/tts/types";
 import type { LengthMode } from "../director/length";
 import { ELEVEN_MODELS } from "../adapters/tts/elevenlabs";
-import type { ElevenSettings, LLMSettings, TtsProvider } from "./settings";
+import { usingDevElevenKey, type ElevenSettings, type LLMSettings, type TtsProvider } from "./settings";
 import { ErrorView } from "./ErrorView";
 
 export interface SettingsPanelProps {
@@ -149,6 +149,9 @@ export function SettingsPanel(p: SettingsPanelProps) {
               onChange={(e) => p.onEleven({ ...p.eleven, apiKey: e.target.value })}
             />
           </label>
+          {usingDevElevenKey(p.eleven.apiKey) && (
+            <div className="badge">Using the key from web/.env.local (development only; it is not saved in the browser).</div>
+          )}
           <label>
             Model
             <select value={p.eleven.modelId} onChange={(e) => p.onEleven({ ...p.eleven, modelId: e.target.value })}>
