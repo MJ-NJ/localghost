@@ -1,0 +1,73 @@
+{
+  "cli_version": "0.12.2",
+  "checkpoint_id": "01M66B057H9H2RWRRTK4GVSSCF",
+  "session_id": "50313d85-6a6b-4c95-b834-3f689cdb8eb5",
+  "strategy": "manual-commit",
+  "created_at": "2026-10-30T12:01:54.0887569Z",
+  "branch": "master",
+  "checkpoints_count": 2,
+  "save_step_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "claude-sonnet-5-5",
+  "turn_id": "3153e3f052a4",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 28,
+    "cache_creation_tokens": 18172,
+    "cache_read_tokens": 4240348,
+    "output_tokens": 5444,
+    "api_call_count": 9
+  },
+  "redaction": {
+    "replacements": 0,
+    "layers": {
+      "betterleaks": 0,
+      "connection_string": 0,
+      "credential_key": 0,
+      "credential_value": 0,
+      "credentialed_uri": 0,
+      "entropy": 0,
+      "key_context": 0,
+      "provider_token": 0,
+      "shell_stdin": 0
+    }
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01KxvA6bgnuGxWZB89dv6E1D",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "devrelay-offers"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "3153e3f052a4",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 1244,
+        "end": 1245,
+        "entry_ids": [
+          "4496ac93-5c32-48e7-8c41-0adcf15139cf"
+        ],
+        "tool_use_id": "toolu_01KxvA6bgnuGxWZB89dv6E1D"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01KxvA6bgnuGxWZB89dv6E1D"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: devrelay-offers",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 15
+  }
+}
