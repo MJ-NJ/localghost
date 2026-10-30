@@ -1,0 +1,153 @@
+Precursor:
+- Started the application
+- Load Voice model
+- Select Heart(en-us, Female, A Grade)
+ - Play sample
+
+Observations:
+- The text and story is generated, 
+- On pressing play i only hear sparking and cracking noise
+- The same case for all the voices in the dropdown
+- Running on webgpu/fp32
+- Stops cleanly but changing the voice or stopping and playing again, starts the story from the starting
+
+Probable exploration needed to fix this cause, Explore on this.
+- The crackling noise is only coming when the model tries to speak, i had a similar issue, this generally arises if that voice model is not available on the running device's browser, even if listed by the API
+
+
+Do this parallely:
+- Use this @Docs/ADR.md  file to store all the arch decisions we took, or the decisions made that could give wrong output, so its easier to debug in long run as well as any tradeoffs with the decision.
+
+---
+
+Observations:
+- Works fine on WASM q8 -> fp32 is the culprit then
+- The voice is still very robotic, and the pauses as well. It sounds like a paragraph reading.
+
+Next Steps:
+- We can ditch the fp32 for the time being, and note it in the @Docs/IMPROVEMENTS.md  file. 
+- We can move on to M2, and parallely fix the Voice being too robotic issue. 
+
+Commit and Push the work first.
+
+---
+
+Observations:
+- I see the notice, and the button works
+- I head the droning and ducking
+- Sound effects are ok-ok, I suppose this short story doesn't tell a lot to judge if all works fine, 
+- lights are flickering, the text is going italic as well
+- Its still summons when I replay after ending, even for same voice
+- pause and play is working fine now
+- This pause play has to be moved either to the side or someplace else, its breaking the feel of a ghost story, thats bad UX.
+- Audio is still robotic, but we can tune that later.
+
+Lets discuss on this, its fix. Then move on to the next phase.
+
+---
+
+Responses:
+1. Yes I had pressed Play sample and not Replay. Replay works fine as needed
+2. Your plan seems fine for this
+3. Works fine as is
+
+I will pull the gemma model in the time being
+
+---
+
+Any sugggestions on What gemma model to use here ?, my ram configuration will allow me to run google/gemma-4-12B-it-qat-q4_0-gguf or google/gemma-4-E4B-it-qat-q4_0-gguf 
+Any other suggestions ?
+
+---
+
+And what if i were to use this one ?
+unsloth/gemma-4-E4B-it-GGUF , specifically the Q4 options 
+that push the model size to below 5gb
+
+---
+
+Yes unsloth one does suppport image-text to text
+
+---
+
+Observations :
+- The story did load for each scare level, but scroll is missing here, also the story was not read to me, it just loaded silently, its still loadidng, its only at 24/75. So assuming this model is very slow to run here. Its still loading, So assuming on higher scare levels it would be slower
+
+---
+
+Yes lets build the streaming parallely to the M4, and go ahead on it.
+
+---
+
+Observations:
+- Nope, still not playing before atleast 50% summoning complete, looks like there is some connection gap.
+- It started at 25/38, seems to be working fine after that
+- Dont see any light effects on 3 scare
+- Stories don't seem complete, they end at weird notes
+- For story ideas we can get some reference from the no sleep on reddit as well, to put in some ideas ,that the story n/5 for all n, should be self sufficient
+
+- I can see multi threaded on 
+- And i got "The model could not read your photos, Story uses notes only"
+and this http://localhost:11434/v1/chat/completions failed with a 400 
+- And the biggest issue, with notes added, the story audio generation time hits almost 13 minutes. 
+- Maybe we need to set size based on the hardware available.
+
+---
+
+Also now we are sure, this model is not a good choice
+
+---
+
+Vision is not listed here, but the model page on hugging face is labeled multimodal, with image, audio, video inputs. Is there a configuration to set here ?
+Lets check this, in the meantime I will restart and test the new setup
+
+---
+
+Yes but we are bound by 16gb ram, so 7gb model in ram would probably not work. Is it better to shift to a lighter model family all together.
+And If you want to test it out, I do have llama cpp installed
+
+---
+
+I can see this in my task manager, ollama is probably running in the background, or there is some memory leak
+Also, The option we have here, is enable the option to provide image only for the cases where the selected model allows it, and that is a ollama show call once the model is selected and parsing of text, We can do that I suppose. Or allow the user to select a checkbox for this. So its like it supports a custom starter + image if your model supports it ?
+- That would allow us to freeze this layer and go ahead.
+
+---
+
+here is the ss of the task manager
+
+---
+
+This run was good, the story was a little boring, and the voice too robotic
+- And we can move to a model with image and a default story which we can use for the demo. 
+- And go on to next phase, and list me all the prequisites for it.
+
+---
+
+I am unable to get the 1 month free from here, can you check ?
+
+---
+
+Lets choose the heart voice, also I have not claimed it yet. Go ahead
+
+---
+
+Store the api key in a env file
+
+---
+
+What all access is needed on the API key ? Do we need anything other thatn Text to Speech ?
+
+---
+
+Go ahead, what is the next step here?, the keys are in place; server is restarted.
+
+---
+
+Observations:
+- I can hear the audio
+- I have tried the next steps as well, Eleven labs performs better than kokoro. But kokoro does quite well given its free.
+
+---
+
+Draft a story around the image I have shared, Pick something creepy but complete, yet not very big, so the listener's context is maintained, take reference from reddit no sleep.
