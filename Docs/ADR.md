@@ -51,7 +51,9 @@ All of these change what is spoken, so they are listed explicitly (code: `cue/pa
 - **Diagnostics added:** per-segment stats (peak, rms, zcr, NaN count) in DebugPanel. Reading: speech ≈ zcr 0.02–0.2; white-noise/garbage ≈ zcr ~0.5, or NaN > 0, or peak pinned at 1.0.
 - **Next:** if WASM is clean, make WASM the default on this class of device (or default to WASM everywhere and make WebGPU opt-in). Not decided until the user confirms.
 
-## ADR-006 Provisional default voice `bm_george` (Provisional, M1)
+## ADR-006 Default Kokoro voice (Superseded 2026-10-30: now `af_heart`, chosen by the user by ear)
+> The default is now `af_heart` ("Heart", en-US female, grade A). The original reasoning below is kept for history.
+
 - **Context:** kokoro-js exposes only name/language/gender/quality grade, no pitch or "calm" metadata.
 - **Decision:** chose a male en-GB voice with a mid grade (C) by metadata alone, never by ear. Higher-graded voices exist (e.g. `af_heart`, grade A) but are not "low".
 - **Debug/revert:** change `DEFAULT_KOKORO_VOICE` in `adapters/tts/kokoroWeb.ts`. Candidates: `bm_fable`, `am_michael`, `am_fenrir`, `af_heart`.

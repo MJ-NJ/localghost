@@ -37,8 +37,8 @@ export function trimSilence(x: Float32Array, sampleRate: number, threshold = 0.0
 /** Bump when anything that changes the audio of a segment changes (trim settings, model, dtype). */
 const KOKORO_CACHE_VERSION = "q8-trim0.004-40ms";
 
-/** Provisional default; chosen from the voice list by grade, not by ear. Verify by listening. */
-export const DEFAULT_KOKORO_VOICE = "bm_george";
+/** Chosen by the user after listening (replaces the provisional bm_george, ADR-006). Grade A in Kokoro's own list. */
+export const DEFAULT_KOKORO_VOICE = "af_heart";
 
 /** Fixed sentence for the speed test, so results are comparable between runs. */
 export const BENCHMARK_TEXT = "The hallway light is off, and somewhere in the house, something is breathing.";
