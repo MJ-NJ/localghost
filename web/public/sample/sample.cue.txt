@@ -1,51 +1,53 @@
 [ambient low]
-Tonight the house is quiet. Too quiet.
-[pause 1.2]
-You set the kettle down and listen.
+You only step into the dining room to get out of the rain.
 [pause 1.5]
-The fridge hums. The pipes tick as they cool.
+Dust on everything. Cobwebs hang over the long table like a veil.
 [pause 1]
-Ordinary sounds. You know every one of them.
+Candlesticks still stand in their places. Every chair is pushed in neatly.
+[pause 1.2]
+Every chair, except one.
 [pause 2]
-Then you notice the hallway light.
-[pause 0.8]
-You switched it off before you came in. You are sure of it.
+At the far end, a single chair is pulled back, as if someone has only just stood up.
 [sfx creak] [light flicker]
 [pause 3]
-[whisper] It is on now.
-[pause 2.5]
-You walk toward it, because that is what people do.
-[sfx footsteps]
-[pause 2]
-The grey coat on the hook by the door [pause 0.8] [slow] has one sleeve raised.
+Two tall mirrors face each other across the room, gold-framed and clouded with age.
+[pause 1]
+You glance into the left one.
 [pause 1.5]
-As if someone were still inside it.
+[slow] The room in the glass is not empty.
+[pause 2]
+The candles are lit. The table is clear, set with silver, and every chair is full. Pale shapes, sitting very straight, all facing the same way.
+[pause 1.2]
+Toward the door. Toward you.
 [sfx heartbeat] [light pulse]
 [pause 3]
-[trembling] You tell yourself it is only the draught.
-[pause 1.2]
-[trembling] Only the draught.
-[pause 2.5]
-[sfx knock]
-[pause 1]
-Three knocks. From inside the wall beside you.
-[pause 3]
-[gasp] [light blackout 3]
-[pause 3]
-[whisper] Behind you, the kettle clicks off.
-[pause 1.5]
-[whisper] But you never switched it on.
-[pause 3]
-[sfx whispers]
+You look away. Dust. Silence. The one pulled-back chair.
 [pause 2]
-[shout] Do not look at the photograph!
-[pause 0.8]
+[whisper] But now there is a place laid in front of it. Clean. Shining.
+[pause 1.5]
+A small card rests beside the plate. You do not want to read it.
+[pause 2]
+You read it anyway.
+[pause 1.5]
+[trembling] It has your name on it, in handwriting that is still wet.
+[sfx whispers]
+[pause 3]
+Behind you, [pause 0.6] [whisper] a chair scrapes back across the boards.
+[sfx scrape]
+[gasp] [light blackout 3]
+[pause 3.5]
+[whisper] When the light returns, you are sitting at the table.
+[pause 1.5]
+[whisper] You do not remember sitting down.
+[pause 2.5]
 [photo reveal sample]
 [pause 4.5]
-[whisper] You took it tonight.
-[pause 1.5]
-[whisper] Look closer. Someone else is standing in the room with you.
-[pause 3]
-[light calm]
+[whisper] That is the photograph you took when you walked in.
+[pause 1.8]
+[whisper] Look at the head of the table.
+[pause 2.5]
+[slow] Someone was already sitting there. Smiling. Waiting for you to arrive.
 [pause 2]
+[light calm]
+[pause 3]
 [ambient stop]
