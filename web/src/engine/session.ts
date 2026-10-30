@@ -1,5 +1,5 @@
 // A story being synthesized. The player can start speaking before synthesis finishes (streaming).
-import type { CueEvent } from "../cue/spec";
+import type { CueEvent, Style } from "../cue/spec";
 import type { TTSAdapter } from "../adapters/tts/types";
 import { timing } from "../lib/timing";
 import { TimelineBuilder, type TimedEvent } from "./timeline";
@@ -47,7 +47,14 @@ export class StorySession {
   private synthMs = 0;
   private startedAt: number | null = null;
 
-  constructor(readonly events: CueEvent[]) {
+  /**
+   * `nativeStyles`: styles the TTS performs itself (ElevenLabs tags). Any other style is emulated
+   * in the audio graph, so a style is never applied twice.
+   */
+  constructor(
+    readonly events: CueEvent[],
+    readonly nativeStyles: ReadonlySet<Style> = new Set(),
+  ) {
     this.totalSegments = events.filter((e) => e.kind === "speech").length;
     this.builder = new TimelineBuilder(events);
     this.builder.advance(this.buffers); // places everything before the first speech

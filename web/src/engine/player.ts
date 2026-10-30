@@ -82,7 +82,7 @@ export class Player {
           if (!buffer) break;
           const src = ctx.createBufferSource();
           src.buffer = buffer;
-          graph.connectVoice(src, ev.style);
+          graph.connectVoice(src, ev.style, t, this.session?.nativeStyles.has(ev.style) ?? false);
           src.start(t);
           this.speechSources.push(src);
           graph.duckForSpeech(at, at + duration);

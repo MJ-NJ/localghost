@@ -1,9 +1,18 @@
 // voice -> styleChain -> voiceBus -> (dry + reverb) -> master -> destination
 // ambient -> ambientBus (ducked) -> master;  sfx -> sfxBus -> master
 import type { Style } from "../cue/spec";
+import { KOKORO_EMULATION } from "../adapters/tts/styleMap";
 import { PACING } from "./timeline";
 
 const IR_SECONDS = 2.5;
+
+/** tanh soft clipper: gentle at low levels, squashes peaks, so a boosted shout distorts instead of hard-clipping. */
+export function softClipCurve(amount: number, points = 1024): Float32Array<ArrayBuffer> {
+  const curve = new Float32Array(points);
+  const norm = Math.tanh(amount);
+  for (let i = 0; i < points; i++) curve[i] = Math.tanh((i / (points - 1) * 2 - 1) * amount) / norm;
+  return curve;
+}
 
 function makeImpulseResponse(ctx: BaseAudioContext): AudioBuffer {
   const len = Math.floor(ctx.sampleRate * IR_SECONDS);
@@ -24,6 +33,8 @@ export class AudioGraph {
   readonly voiceBus: GainNode;
   readonly ambientBus: GainNode;
   readonly sfxBus: GainNode;
+  /** Reverb input, for styles that add their own send (whisper). */
+  readonly reverbIn: ConvolverNode;
 
   constructor(readonly ctx: AudioContext) {
     this.master = ctx.createGain();
@@ -36,6 +47,7 @@ export class AudioGraph {
     wet.gain.value = 0.22;
     const reverb = ctx.createConvolver();
     reverb.buffer = makeImpulseResponse(ctx);
+    this.reverbIn = reverb;
     this.voiceBus.connect(dry).connect(this.master);
     this.voiceBus.connect(reverb).connect(wet).connect(this.master);
 
@@ -47,9 +59,48 @@ export class AudioGraph {
     this.sfxBus.connect(this.master);
   }
 
-  /** styleChain: per-style emulation (whisper/trembling/shout) is added in M5; for now all pass through. */
-  connectVoice(src: AudioNode, _style: Style) {
-    src.connect(this.voiceBus);
+  /**
+   * styleChain. A style the TTS performs natively (`native`) goes straight through. Otherwise Kokoro's styles
+   * are emulated here: whisper (quieter, high-passed, more reverb), trembling (pitch wobble), shout (louder,
+   * soft-clipped). `slow` is just Kokoro's speed option and needs nothing here. `when` is the absolute start time.
+   */
+  connectVoice(src: AudioBufferSourceNode, style: Style, when: number, native: boolean) {
+    const ctx = this.ctx;
+    if (native || style === "normal" || style === "slow") {
+      src.connect(this.voiceBus);
+      return;
+    }
+    if (style === "whisper") {
+      const e = KOKORO_EMULATION.whisper;
+      const hp = ctx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.value = e.highpassHz;
+      const g = ctx.createGain();
+      g.gain.value = e.gain;
+      const send = ctx.createGain();
+      send.gain.value = e.reverbSend;
+      src.connect(hp).connect(g);
+      g.connect(this.voiceBus);
+      g.connect(send).connect(this.reverbIn);
+    } else if (style === "trembling") {
+      const e = KOKORO_EMULATION.trembling;
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = e.lfoHz;
+      const depth = ctx.createGain();
+      depth.gain.value = e.detuneCents;
+      lfo.connect(depth).connect(src.detune);
+      lfo.start(when);
+      src.onended = () => lfo.stop();
+      src.connect(this.voiceBus);
+    } else {
+      const e = KOKORO_EMULATION.shout;
+      const g = ctx.createGain();
+      g.gain.value = e.gain;
+      const clip = ctx.createWaveShaper();
+      clip.curve = softClipCurve(e.clipAmount);
+      clip.oversample = "2x";
+      src.connect(g).connect(clip).connect(this.voiceBus);
+    }
   }
 
   private duckEnd: number | null = null;

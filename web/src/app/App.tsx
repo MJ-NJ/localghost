@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CueParser } from "../cue/parser";
-import { segment } from "../cue/segmenter";
-import type { Style } from "../cue/spec";
+import type { CueEvent, Style } from "../cue/spec";
 import { OpenAICompatAdapter, hostOf } from "../adapters/llm/openaiCompat";
 import { detectVision, type VisionSupport } from "../adapters/llm/capabilities";
 import { direct, countSpeechWords } from "../director/director";
 import { lengthFactor, scaledWords, type LengthMode } from "../director/length";
 import { profileFor } from "../director/profiles";
 import { DEFAULT_KOKORO_VOICE, KokoroWebAdapter, type KokoroProgress } from "../adapters/tts/kokoroWeb";
-import type { VoiceInfo } from "../adapters/tts/types";
+import type { TTSAdapter, VoiceInfo } from "../adapters/tts/types";
+import { ElevenLabsAdapter } from "../adapters/tts/elevenlabs";
+import { routeForAdapter } from "../adapters/tts/router";
+import { audioCacheSize, clearAudioCache } from "../lib/cache";
 import { Effects } from "../engine/effects";
 import { PhotoReveal } from "../engine/photoReveal";
 import { analysePhotos } from "../memories/vision";
@@ -31,7 +33,19 @@ import { DebugPanel } from "./DebugPanel";
 import { ErrorView } from "./ErrorView";
 import { MemoriesPanel } from "./MemoriesPanel";
 import { SettingsPanel } from "./SettingsPanel";
-import { loadLLMSettings, saveLLMSettings, type LLMSettings } from "./settings";
+import { DataFlowBadge } from "./DataFlowBadge";
+import { dataFlow } from "./dataFlow";
+import {
+  loadElevenSettings,
+  loadLLMSettings,
+  loadProvider,
+  saveElevenSettings,
+  saveLLMSettings,
+  saveProvider,
+  type ElevenSettings,
+  type LLMSettings,
+  type TtsProvider,
+} from "./settings";
 import { Stage } from "./Stage";
 
 type DrawerTab = "settings" | "memories" | "debug";
@@ -123,6 +137,11 @@ export function App() {
   const [memError, setMemError] = useState("");
   const [vision, setVision] = useState<[number, number] | null>(null);
   const [notice, setNotice] = useState("");
+  const [provider, setProvider] = useState<TtsProvider>(loadProvider);
+  const [eleven, setEleven] = useState<ElevenSettings>(loadElevenSettings);
+  const [elevenVoices, setElevenVoices] = useState<VoiceInfo[]>([]);
+  const [loadingElevenVoices, setLoadingElevenVoices] = useState(false);
+  const [cacheSize, setCacheSize] = useState(0);
 
   const fxBlack = useRef<HTMLDivElement>(null);
   const fxRed = useRef<HTMLDivElement>(null);
@@ -142,11 +161,56 @@ export function App() {
   const preparedKey = useRef<string | null>(null);
   const [hudVisible, setHudVisible] = useState(true);
   const lineN = useRef(0);
+  const lastEvents = useRef<CueEvent[] | null>(null); // the last story as parsed, so another voice can re-render it
+  const lastSource = useRef<Source>("story");
   const adapter = useMemo(() => new KokoroWebAdapter(setProgress, workers), [workers]);
   useEffect(() => {
     setBench(readBench(workers));
     return () => adapter.dispose();
   }, [adapter, workers]);
+
+  const elevenAdapter = useMemo(
+    () => new ElevenLabsAdapter({ apiKey: eleven.apiKey, modelId: eleven.modelId }),
+    [eleven.apiKey, eleven.modelId],
+  );
+  const eleven_ = provider === "elevenlabs";
+  const tts: TTSAdapter = eleven_ ? elevenAdapter : adapter;
+  const ttsVoice = eleven_ ? eleven.voiceId : voice;
+  const concurrency = eleven_ ? elevenAdapter.caps.concurrency : adapter.workerCount;
+  /** Identifies what a rendered session sounds like: same key means it can be replayed as is. */
+  const renderKey = (source: Source) => `${source}|${provider}|${ttsVoice}|${eleven_ ? eleven.modelId : ""}`;
+
+  const refreshCacheSize = useCallback(() => void audioCacheSize().then(setCacheSize).catch(() => {}), []);
+  useEffect(refreshCacheSize, [refreshCacheSize]);
+
+  async function loadElevenVoices() {
+    setError(null);
+    setLoadingElevenVoices(true);
+    try {
+      const list = await elevenAdapter.listVoices();
+      setElevenVoices(list);
+      if (list.length && !list.some((v) => v.id === eleven.voiceId)) updateEleven({ ...eleven, voiceId: list[0].id });
+    } catch (e) {
+      setError(e);
+    }
+    setLoadingElevenVoices(false);
+  }
+
+  function updateEleven(v: ElevenSettings) {
+    setEleven(v);
+    saveElevenSettings(v);
+  }
+
+  function changeProvider(p: TtsProvider) {
+    setProvider(p);
+    saveProvider(p);
+  }
+
+  function assertVoiceReady() {
+    if (eleven_ && (!eleven.apiKey || !eleven.voiceId)) {
+      throw new Error("Enter your ElevenLabs API key and choose a voice in Settings first, or switch the voice back to Kokoro.");
+    }
+  }
 
   useEffect(() => {
     if (fxBlack.current && fxRed.current && fxVignette.current) {
@@ -252,6 +316,71 @@ export function App() {
 
   const isAbort = (e: unknown) => e instanceof DOMException && e.name === "AbortError";
 
+  const fail = (e: unknown) => {
+    if (!isAbort(e)) setError(e);
+    setPhase("idle");
+    setPrerender(null);
+    setDraft("");
+  };
+
+  /** Route a parsed story to the current voice, synthesize in the background, and start playing as soon as it is safe. */
+  async function render(events: CueEvent[], source: Source, ac: AbortController) {
+    lastEvents.current = events;
+    lastSource.current = source;
+    const key = renderKey(source);
+    const segments = routeForAdapter(events, tts);
+
+    setPhase("summoning");
+    setDraft("");
+    const synthStart = performance.now();
+    const session = new StorySession(segments, tts.caps.styles);
+    // Synthesis continues in the background while the story plays (streaming playback).
+    const synth = synthesizeInto(session, {
+      adapter: tts,
+      voice: ttsVoice,
+      signal: ac.signal,
+      concurrency,
+      onProgress: (d, t) => setPrerender([d, t, performance.now() - synthStart]),
+    });
+    synth.then(
+      () => {
+        prepared.current = session; // complete: Replay / Play sample can reuse it
+        preparedKey.current = key;
+        setHasStory(true);
+        refreshCacheSize();
+      },
+      (e) => {
+        if (isAbort(e)) return;
+        setError(e);
+        player.current?.stop(); // synthesis died mid-story
+      },
+    );
+    await session.ready();
+    timing.record("time to start speaking", performance.now() - synthStart);
+    setPhase("idle");
+    setPrerender(null);
+    await run(session);
+  }
+
+  /** Render the last story again, for example after switching voice. */
+  async function rerender(events: CueEvent[]) {
+    setError(null);
+    setLine(null);
+    const ac = new AbortController();
+    abort.current = ac;
+    try {
+      getPlayer();
+      assertVoiceReady();
+      if (!eleven_) {
+        setPhase("loading");
+        await ensureModel();
+      }
+      await render(events, lastSource.current, ac);
+    } catch (e) {
+      fail(e);
+    }
+  }
+
   async function begin(source: Source) {
     setError(null);
     setLine(null);
@@ -260,29 +389,33 @@ export function App() {
     abort.current = ac;
     try {
       getPlayer(); // create the AudioContext inside the user gesture
-      if (source === "sample" && prepared.current && preparedKey.current === `sample:${voice}`) {
-        await run(prepared.current); // same script + voice: reuse the synthesis (M5 adds the real cache)
+      assertVoiceReady(); // fail before spending minutes on the story model
+      if (source === "sample" && prepared.current && preparedKey.current === renderKey("sample")) {
+        await run(prepared.current); // same script + voice: reuse the synthesis
         return;
       }
 
-      let segments;
+      let events: CueEvent[];
       if (source === "sample") {
-        setPhase("loading");
-        await ensureModel();
+        if (!eleven_) {
+          setPhase("loading");
+          await ensureModel();
+        }
         const res = await fetch(`${import.meta.env.BASE_URL}sample/sample.cue.txt`);
         if (!res.ok) throw new Error(`Could not load the sample script (${res.status})`);
-        const { events, stats } = CueParser.parse(await res.text());
-        if (stats.unknownTags) timing.count("unknown tags dropped", stats.unknownTags);
-        segments = segment(events, { maxChars: adapter.caps.maxChars, targetChars: 0 });
+        const parsed = CueParser.parse(await res.text());
+        if (parsed.stats.unknownTags) timing.count("unknown tags dropped", parsed.stats.unknownTags);
+        events = parsed.events;
       } else {
         setNotice("");
         const llmAdapter = new OpenAICompatAdapter(llm);
-        const voiceLoad = ensureModel(); // load the voice while the model works
+        const voiceLoad = eleven_ ? Promise.resolve() : ensureModel(); // load Kokoro while the model works
         voiceLoad.catch(() => {}); // surfaced below if it is still failing when we need it
 
-        // Auto length needs the voice's speed on this machine; time it once (then it is remembered).
-        let rtf = bench ?? undefined;
-        if (lengthMode === "auto" && rtf === undefined) {
+        // Auto length needs Kokoro's speed on this machine; time it once (then it is remembered).
+        // A cloud voice is fast, so it gets the full length.
+        let rtf = eleven_ ? undefined : (bench ?? undefined);
+        if (!eleven_ && lengthMode === "auto" && rtf === undefined) {
           setPhase("loading");
           rtf = await runBenchmark();
         }
@@ -346,45 +479,16 @@ export function App() {
         if (countSpeechWords(result.events) === 0) {
           throw new Error("The model returned no spoken text. Try again, or try a different model.");
         }
-        segments = segment(result.events, { maxChars: adapter.caps.maxChars, targetChars: 0 });
-        setPhase("loading");
-        await voiceLoad;
+        events = result.events;
+        if (!eleven_) {
+          setPhase("loading");
+          await voiceLoad;
+        }
       }
 
-      setPhase("summoning");
-      setDraft("");
-      const synthStart = performance.now();
-      const session = new StorySession(segments);
-      // Synthesis continues in the background while the story plays (streaming playback).
-      const synth = synthesizeInto(session, {
-        adapter,
-        voice,
-        signal: ac.signal,
-        concurrency: adapter.workerCount,
-        onProgress: (d, t) => setPrerender([d, t, performance.now() - synthStart]),
-      });
-      synth.then(
-        () => {
-          prepared.current = session; // complete: Replay / Play sample can reuse it
-          preparedKey.current = source === "sample" ? `sample:${voice}` : "story";
-          setHasStory(true);
-        },
-        (e) => {
-          if (isAbort(e)) return;
-          setError(e);
-          player.current?.stop(); // synthesis died mid-story
-        },
-      );
-      await session.ready();
-      timing.record("time to start speaking", performance.now() - synthStart);
-      setPhase("idle");
-      setPrerender(null);
-      await run(session);
+      await render(events, source, ac);
     } catch (e) {
-      if (!isAbort(e)) setError(e);
-      setPhase("idle");
-      setPrerender(null);
-      setDraft("");
+      fail(e);
     }
   }
 
@@ -405,9 +509,13 @@ export function App() {
   };
 
   const replay = () => {
-    if (prepared.current) {
+    const events = lastEvents.current;
+    if (!events) return;
+    if (prepared.current && preparedKey.current === renderKey(lastSource.current)) {
       setLine(null);
       void run(prepared.current);
+    } else {
+      void rerender(events); // the voice changed since this story was rendered
     }
   };
 
@@ -454,6 +562,13 @@ export function App() {
 
   const busy = phase !== "idle";
   const active = playerState !== "idle";
+  const flow = dataFlow({
+    llmBaseUrl: llm.baseUrl,
+    tts: provider,
+    photosMaySend: llm.images !== "off",
+    photoCount: photos.length,
+    hasNotes: notes.trim().length > 0,
+  });
 
   // While a story plays, the HUD fades after 3 s of inactivity and returns on mouse move / key press.
   useEffect(() => {
@@ -534,6 +649,15 @@ export function App() {
       </button>{" "}
       <button onClick={() => request("sample")}>Play sample</button>{" "}
       {hasStory && <button onClick={replay}>Replay</button>}
+      <div className="voice-toggle">
+        <label>
+          Voice{" "}
+          <select value={provider} onChange={(e) => changeProvider(e.target.value as TtsProvider)}>
+            <option value="kokoro-web">Kokoro (offline)</option>
+            <option value="elevenlabs">ElevenLabs</option>
+          </select>
+        </label>
+      </div>
     </>
   );
 
@@ -547,7 +671,7 @@ export function App() {
           <span>{level}</span>
         </div>
         <span className="spacer" />
-        <span className="badge">Data flow: —</span>
+        <DataFlowBadge flow={flow} />
       </header>
       <div className="body">
         <Stage
@@ -596,6 +720,15 @@ export function App() {
                 device={device}
                 locked={busy || active}
                 onLoadVoiceModel={loadModel}
+                provider={provider}
+                onProvider={changeProvider}
+                eleven={eleven}
+                onEleven={updateEleven}
+                elevenVoices={elevenVoices}
+                loadingElevenVoices={loadingElevenVoices}
+                onLoadElevenVoices={() => void loadElevenVoices()}
+                cacheSize={cacheSize}
+                onClearCache={() => void clearAudioCache().then(refreshCacheSize)}
                 visionSupport={visionSupport}
                 checkingVision={checkingVision}
                 onCheckVision={() => void checkVision()}

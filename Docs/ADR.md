@@ -193,3 +193,33 @@ User feedback after M1: voice "robotic", pauses "like a paragraph reading". Prob
 - **Settings:** a "Check model for image support" button shows the result; it resets when the model or URL changes.
 - **Limits:** the server API is only reachable if CORS allows `/api/show` (same `OLLAMA_ORIGINS` as `/v1`); older Ollama versions do not list `capabilities` (result "unknown"). A model that accepts images but ignores them still cannot be detected.
 - **Open question (not built):** in the notes-only path the photo reveal is also skipped (ADR-023). The reveal itself needs no vision, so it could still fire at the climax with the listener's own photo even when the model can't read it. Not changed without sign-off.
+
+## ADR-031 ElevenLabs: browser calls, model and tags (Provisional, unverified with a real key, M5)
+- **CORS (verified 2026-10-30):** a preflight to `api.elevenlabs.io` returns `access-control-allow-origin: *`, `allow-headers: *`, methods POST/GET/OPTIONS. Browser calls from localhost and from a hosted origin are allowed, so there is no proxy. A real request with a key has not been made yet.
+- **Model:** default `eleven_v4` (newer than the plan's `eleven_v3`; documented as following audio tags more reliably, 10,000-character limit). `eleven_v3` (5,000) and `eleven_v4_turbo` are selectable. The segment target stays 350 characters and `maxChars` 5000 so either model works. The ElevenLabs models table gave conflicting hints about which models take audio tags, so **whether tags actually change the delivery must be checked by ear**.
+- **Tag spellings (`adapters/tts/styleMap.ts`, one file to edit):** whisper `[whispers]`, slow `[slowly]`, trembling `[nervous]`, shout `[shouting]` (the plan said `[shouts]`), sigh `[sighs]`, gasp `[gasps]`, laugh `[laughs]`. `breath` has no tag and stays a procedural sound effect. Tags are free-form directions in ElevenLabs' docs, so a wrong spelling should degrade, not fail. `[nervous]` is the least certain.
+- **Non-verbals:** for ElevenLabs a `[sigh]`, `[gasp]` or `[laugh]` directly before speech (across instant events like sfx/lights, but not across a pause) is folded into that segment as a leading tag instead of playing a noise sound. Otherwise it stays a procedural sound.
+- **Concurrency 2, no streaming, always prerendered** (plan). Errors (401 key, 402/quota, 429, 404/422 voice or model) are translated into plain messages.
+- **Credits:** each new segment costs characters. Identical segments (same model, voice, style, text) are served from the cache.
+
+## ADR-032 Audio cache (Accepted, M5)
+- Key: `sha256(provider | version-or-model | voice | style | nonverbal | [speed] | text)`. Kokoro stores trimmed PCM (Float32) and the key includes a `KOKORO_CACHE_VERSION` and the speed, so changing trim or pacing constants invalidates old audio instead of replaying stale clips. ElevenLabs stores the mp3 bytes it received and decodes on each use.
+- A cached Kokoro segment is served **without loading the voice model**.
+- The speed test deliberately bypasses the cache (it would otherwise time a database read).
+- Storage failures (quota, private mode) just mean a miss. Hits and misses are counted in the Debug tab; Settings has "Clear audio cache".
+- Size: PCM is about 176 KB per second of Kokoro speech, so a long story is tens of MB in IndexedDB. Not capped yet.
+
+## ADR-033 Kokoro style emulation (Provisional, untuned, M5)
+- Applied in the audio graph only to styles the adapter does not do natively (so a style is never applied twice): whisper = gain 0.6, high-pass 300 Hz, extra reverb send 0.5 and Kokoro speed x0.95; trembling = pitch wobble of 15 cents at 6 Hz; shout = gain 1.2 into a soft clipper. Values are the plan's, plus the reverb send and clipper curve (my choices). `slow` is Kokoro's own speed option (0.78).
+- This is meant to help the "robotic" feel, but it adds expression only on lines the story tags; plain narration is unchanged.
+
+## ADR-034 DataFlowBadge states (Accepted, M5; two cases added beyond the plan)
+- Plan: green (local model + offline voice), yellow (local model + ElevenLabs), red (remote model + photos). Added: remote model **without** photos (or photos set to "No") is yellow ("Notes and prompts are sent to {host}"), and remote model + ElevenLabs without photos is yellow naming both.
+- The red case triggers when photos exist and the image setting is not "No", even if Auto would end up skipping them (the conservative reading). The badge opens a table of what goes where, with items that leave the computer highlighted.
+
+## ADR-035 Provider toggle and replay (Accepted, M5)
+- A Voice selector sits next to the Stage controls and in Settings. Replay re-renders the same parsed story with the chosen voice when it differs from the one last rendered (shows "Summoning" again, but cached segments are free), and replays instantly otherwise.
+- ElevenLabs needs a key and a voice before anything starts; this is checked before the story model is called so minutes are not wasted. With ElevenLabs, Auto story length uses the full length (no speed test).
+
+## ADR-036 Draft default demo story (Draft, needs approval)
+- `public/sample/sample.cue.txt` is a new hand-written draft (about 250 spoken words) that uses all four voice styles, several effects, and ends on `[photo reveal sample]`. It uses generic objects (kettle, grey coat, hallway light) because the real room photo is not known yet. The reveal does nothing until Sample mode wires `sample_room.jpg` (M6). PLAN.md says the user approves the final script.

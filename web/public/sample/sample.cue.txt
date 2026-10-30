@@ -1,12 +1,51 @@
 [ambient low]
-You told yourself the hallway light was off when you left.
+Tonight the house is quiet. Too quiet.
+[pause 1.2]
+You set the kettle down and listen.
 [pause 1.5]
-[whisper] It isn't now.
+The fridge hums. The pipes tick as they cool.
+[pause 1]
+Ordinary sounds. You know every one of them.
+[pause 2]
+Then you notice the hallway light.
+[pause 0.8]
+You switched it off before you came in. You are sure of it.
 [sfx creak] [light flicker]
 [pause 3]
-The grey coat on your door [pause 0.8] [slow] has one sleeve raised.
-[gasp] [light blackout 3]
+[whisper] It is on now.
+[pause 2.5]
+You walk toward it, because that is what people do.
+[sfx footsteps]
 [pause 2]
-Something is breathing, [pause 1] very softly, [pause 1] behind the wall.
+The grey coat on the hook by the door [pause 0.8] [slow] has one sleeve raised.
+[pause 1.5]
+As if someone were still inside it.
+[sfx heartbeat] [light pulse]
 [pause 3]
+[trembling] You tell yourself it is only the draught.
+[pause 1.2]
+[trembling] Only the draught.
+[pause 2.5]
+[sfx knock]
+[pause 1]
+Three knocks. From inside the wall beside you.
+[pause 3]
+[gasp] [light blackout 3]
+[pause 3]
+[whisper] Behind you, the kettle clicks off.
+[pause 1.5]
+[whisper] But you never switched it on.
+[pause 3]
+[sfx whispers]
+[pause 2]
+[shout] Do not look at the photograph!
+[pause 0.8]
+[photo reveal sample]
+[pause 4.5]
+[whisper] You took it tonight.
+[pause 1.5]
+[whisper] Look closer. Someone else is standing in the room with you.
+[pause 3]
+[light calm]
+[pause 2]
 [ambient stop]

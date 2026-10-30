@@ -4,7 +4,8 @@ import { OpenAICompatAdapter } from "../adapters/llm/openaiCompat";
 import type { VisionSupport } from "../adapters/llm/capabilities";
 import type { VoiceInfo } from "../adapters/tts/types";
 import type { LengthMode } from "../director/length";
-import type { LLMSettings } from "./settings";
+import { ELEVEN_MODELS } from "../adapters/tts/elevenlabs";
+import type { ElevenSettings, LLMSettings, TtsProvider } from "./settings";
 import { ErrorView } from "./ErrorView";
 
 export interface SettingsPanelProps {
@@ -16,6 +17,16 @@ export interface SettingsPanelProps {
   device: string;
   locked: boolean;
   onLoadVoiceModel(): void;
+  provider: TtsProvider;
+  onProvider(p: TtsProvider): void;
+  eleven: ElevenSettings;
+  onEleven(v: ElevenSettings): void;
+  elevenVoices: VoiceInfo[];
+  loadingElevenVoices: boolean;
+  onLoadElevenVoices(): void;
+  /** Number of cached audio segments. */
+  cacheSize: number;
+  onClearCache(): void;
   /** Result of the last "can this model see?" check: undefined = not checked. */
   visionSupport: VisionSupport | undefined;
   checkingVision: boolean;
@@ -121,6 +132,53 @@ export function SettingsPanel(p: SettingsPanelProps) {
 
       <h3>Voice</h3>
       <label>
+        Voice provider
+        <select value={p.provider} disabled={p.locked} onChange={(e) => p.onProvider(e.target.value as TtsProvider)}>
+          <option value="kokoro-web">Kokoro, in this browser (offline, free)</option>
+          <option value="elevenlabs">ElevenLabs (your API key, uses credits)</option>
+        </select>
+      </label>
+      {p.provider === "elevenlabs" && (
+        <>
+          <label>
+            ElevenLabs API key (only sent to api.elevenlabs.io)
+            <input
+              type="password"
+              autoComplete="off"
+              value={p.eleven.apiKey}
+              onChange={(e) => p.onEleven({ ...p.eleven, apiKey: e.target.value })}
+            />
+          </label>
+          <label>
+            Model
+            <select value={p.eleven.modelId} onChange={(e) => p.onEleven({ ...p.eleven, modelId: e.target.value })}>
+              {ELEVEN_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button onClick={p.onLoadElevenVoices} disabled={p.loadingElevenVoices || !p.eleven.apiKey}>
+            {p.loadingElevenVoices ? "Loading voices…" : "Load my voices"}
+          </button>
+          <label>
+            Voice
+            <select value={p.eleven.voiceId} onChange={(e) => p.onEleven({ ...p.eleven, voiceId: e.target.value })}>
+              {!p.elevenVoices.length && <option value={p.eleven.voiceId}>{p.eleven.voiceId || "(load your voices first)"}</option>}
+              {p.elevenVoices.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="badge">
+            ElevenLabs charges credits per character. Segments you have already heard are cached on this device and are not paid for again.
+          </div>
+        </>
+      )}
+      <label>
         Voice (Kokoro)
         <select value={p.voice} onChange={(e) => p.onVoice(e.target.value)} disabled={p.locked}>
           {!p.voices.length && <option value={p.voice}>{p.voice} (load model to list voices)</option>}
@@ -163,6 +221,12 @@ export function SettingsPanel(p: SettingsPanelProps) {
             ? `Voice is faster than speech (${p.bench.toFixed(2)}x).`
             : `Voice takes ${p.bench.toFixed(1)}x as long as the speech it makes.`}
       </div>
+
+      <h3>Audio cache</h3>
+      <div className="badge">{p.cacheSize} segment{p.cacheSize === 1 ? "" : "s"} saved on this device. Replays never call the voice again.</div>
+      <button onClick={p.onClearCache} disabled={p.cacheSize === 0}>
+        Clear audio cache
+      </button>
 
       <h3>Accessibility</h3>
       <label className="check">

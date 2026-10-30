@@ -172,3 +172,13 @@ button.primary { border-color: var(--accent); color: var(--accent); }
 .drop { border: 1px dashed var(--border); border-radius: 6px; padding: 0.8rem; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--text-dim); }
 .drop.over { border-color: var(--accent); color: var(--accent); }
 .drop.disabled { opacity: 0.5; }
+
+.flow { position: relative; }
+.badge-button { background: transparent; border-color: transparent; color: var(--text-dim); font-size: 0.8rem; padding: 0.2rem 0.4rem; }
+.flow-panel { position: absolute; right: 0; top: 2rem; z-index: 30; width: min(30rem, 90vw); background: var(--bg-raised); border: 1px solid var(--border); border-radius: 6px; padding: 0.6rem; }
+.flow-panel table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.flow-panel th, .flow-panel td { text-align: left; padding: 0.3rem 0.4rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+.flow-panel tr.leaves td { color: #e0a040; }
+
+.voice-toggle { margin-top: 0.8rem; font-size: 0.8rem; color: var(--text-dim); }
+.voice-toggle select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.2rem; }
