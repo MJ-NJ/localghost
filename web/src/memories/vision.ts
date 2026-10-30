@@ -115,6 +115,8 @@ export interface VisionResult {
   bestId?: PhotoId;
   /** The model rejected image input; the story should use notes only. */
   unsupported: boolean;
+  /** The server's own error text when it rejected the image request. */
+  detail?: string;
 }
 
 async function collect(it: AsyncIterable<string>): Promise<string> {
@@ -175,7 +177,7 @@ export async function analysePhotos(adapter: LLMAdapter, photos: VisionPhoto[], 
         // (A connection failure has no status and is rethrown: that is a different problem.)
         if (e instanceof LLMError && e.status !== undefined) {
           stop();
-          return { inventories: {}, unsupported: true };
+          return { inventories: {}, unsupported: true, detail: e.message };
         }
         throw e;
       }

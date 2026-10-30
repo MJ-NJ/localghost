@@ -28,6 +28,8 @@ export interface DirectorResult {
   ttftMs: number | null;
   genMs: number;
   tokensPerSec: number;
+  /** "length" means the model was cut off before finishing the story. */
+  finishReason: string | null;
 }
 
 interface Attempt {
@@ -37,6 +39,17 @@ interface Attempt {
   ttftMs: number | null;
   genMs: number;
   chunks: number;
+  finishReason: string | null;
+}
+
+/**
+ * If the story starts an ambient bed but never stops it (small models write "[sfx stop]" etc.),
+ * end with a short pause and a fade-out so it does not just cut off.
+ */
+export function ensureEnding(events: CueEvent[]): CueEvent[] {
+  const ambient = events.filter((e) => e.kind === "ambient");
+  if (!ambient.length || (ambient[ambient.length - 1] as { mode: string }).mode === "stop") return events;
+  return [...events, { kind: "pause", seconds: 2 }, { kind: "ambient", mode: "stop" }];
 }
 
 export const countSpeechWords = (events: CueEvent[]) =>
@@ -63,7 +76,15 @@ async function attempt(adapter: LLMAdapter, messages: ChatMessage[], o: Director
     events.push(...parser.push(delta));
   }
   events.push(...parser.flush());
-  return { events, text, stats: parser.stats, ttftMs, genMs: performance.now() - t0, chunks };
+  return {
+    events,
+    text,
+    stats: parser.stats,
+    ttftMs,
+    genMs: performance.now() - t0,
+    chunks,
+    finishReason: adapter.lastFinishReason ?? null,
+  };
 }
 
 /** Stream a story from the LLM, parse it incrementally, and retry once if the format is broken. */
@@ -97,8 +118,20 @@ export async function direct(o: DirectorOptions): Promise<DirectorResult> {
   timing.note(`llm: ~${tokensPerSec.toFixed(1)} tokens/s (stream chunks), ${attempts} attempt(s)`);
   if (best.stats.unknownTags) timing.count("unknown tags dropped", best.stats.unknownTags);
 
+  const events = ensureEnding(best.events);
+  const kinds = new Map<string, number>();
+  for (const e of events) kinds.set(e.kind, (kinds.get(e.kind) ?? 0) + 1);
+  timing.note(
+    `story: ${countSpeechWords(events)} words; ` + [...kinds].map(([k, n]) => `${n} ${k}`).join(", ") + `; finish: ${best.finishReason ?? "unknown"}`,
+  );
+  if (best.finishReason === "length") {
+    console.warn("director: the model hit its token limit; the story was cut off");
+    timing.note("The story was cut off by the token limit (max_tokens or the server's context size).");
+  }
+
   return {
-    events: best.events,
+    finishReason: best.finishReason,
+    events,
     text: best.text,
     stats: best.stats,
     attempts,

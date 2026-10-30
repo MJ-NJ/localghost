@@ -20,6 +20,7 @@ const trimSlash = (s: string) => s.trim().replace(/\/+$/, "");
 export class OpenAICompatAdapter implements LLMAdapter {
   readonly id = "openai-compat";
   readonly caps: LLMAdapter["caps"];
+  lastFinishReason: string | null = null;
 
   constructor(private readonly cfg: LLMConfig) {
     // vision support can't be known up front; assume yes and let the vision pass report failure (M4)
@@ -64,6 +65,7 @@ export class OpenAICompatAdapter implements LLMAdapter {
     if (!this.cfg.model.trim()) {
       throw new LLMError("No model name set. Enter the model tag from `ollama list` in Settings.");
     }
+    this.lastFinishReason = null;
     const body: Record<string, unknown> = {
       model: this.cfg.model,
       messages: req.messages,
@@ -95,11 +97,14 @@ export class OpenAICompatAdapter implements LLMAdapter {
     const decoder = new TextDecoder();
     const sse = new SseParser();
 
+    const self = this;
     const deltas = function* (data: string[]) {
       for (const d of data) {
         try {
-          const text = (JSON.parse(d) as { choices?: { delta?: { content?: string } }[] }).choices?.[0]?.delta?.content;
-          if (text) yield text;
+          const choice = (JSON.parse(d) as { choices?: { delta?: { content?: string }; finish_reason?: string | null }[] })
+            .choices?.[0];
+          if (choice?.finish_reason) self.lastFinishReason = choice.finish_reason;
+          if (choice?.delta?.content) yield choice.delta.content;
         } catch {
           /* ignore a malformed event */
         }

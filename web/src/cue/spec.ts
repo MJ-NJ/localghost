@@ -37,6 +37,21 @@ export const TAG = {
 
 export const PHOTO_VERB = "reveal";
 
+/** Common model slips for a tag name -> the real one ("[lights pulse]"). */
+export const TAG_ALIASES: Readonly<Record<string, string>> = { lights: TAG.light };
+
+/**
+ * Map an sfx word to a known name, forgiving plural/singular slips only
+ * ("scrapes" -> scrape, "footstep" -> footsteps). Anything else is unknown.
+ */
+export function normalizeSfx(word: string): SfxName | undefined {
+  const list = SFX_NAMES as readonly string[];
+  for (const c of [word, word + "s", word.replace(/s$/, ""), word.replace(/es$/, "")]) {
+    if (list.includes(c)) return c as SfxName;
+  }
+  return undefined;
+}
+
 /** [pause N] is clamped to this range (seconds). */
 export const PAUSE_MIN = 0.2;
 export const PAUSE_MAX = 6;

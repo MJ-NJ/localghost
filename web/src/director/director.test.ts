@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { OpenAICompatAdapter } from "../adapters/llm/openaiCompat";
 import { LLMError, type ChatRequest, type LLMAdapter } from "../adapters/llm/types";
-import { SFX_NAMES } from "../cue/spec";
-import { direct, isBroken } from "./director";
+import { SFX_NAMES, type CueEvent } from "../cue/spec";
+import { direct, ensureEnding, isBroken } from "./director";
 import { PROFILES, profileFor } from "./profiles";
 import { buildSystemPrompt, REPAIR_LINE } from "./prompts";
 
@@ -55,6 +55,24 @@ describe("director", () => {
     expect(isBroken([])).toBe(true);
     expect(isBroken([{ kind: "pause", seconds: 1 }])).toBe(true);
     expect(isBroken([{ kind: "speech", text: "one two three four five six seven eight nine ten", style: "normal" }])).toBe(true);
+  });
+});
+
+describe("ensureEnding", () => {
+  it("adds a pause and an ambient stop when the bed is never stopped", () => {
+    const out = ensureEnding([{ kind: "ambient", mode: "low" }, { kind: "sfx", name: "creak" }]);
+    expect(out.slice(-2)).toEqual([{ kind: "pause", seconds: 2 }, { kind: "ambient", mode: "stop" }]);
+  });
+  it("leaves a story that already stops the bed, or never started one, alone", () => {
+    const stopped: CueEvent[] = [{ kind: "ambient", mode: "low" }, { kind: "ambient", mode: "stop" }];
+    expect(ensureEnding(stopped)).toBe(stopped);
+    const none: CueEvent[] = [{ kind: "sfx", name: "creak" }];
+    expect(ensureEnding(none)).toBe(none);
+  });
+  it("direct() applies it", async () => {
+    const script = "[ambient low]\nYou hear the old hallway breathing slowly around you tonight.\n[sfx creak]\n";
+    const r = await direct({ adapter: fakeAdapter([script]), level: 3 });
+    expect(r.events.at(-1)).toEqual({ kind: "ambient", mode: "stop" });
   });
 });
 
@@ -120,6 +138,18 @@ describe("OpenAICompatAdapter", () => {
     await collect(keyed.chat({ messages: [] }));
     const init2 = (fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1];
     expect((init2.headers as Record<string, string>).Authorization).toBe("Bearer k");
+    vi.unstubAllGlobals();
+  });
+
+  it("records the finish reason so a cut-off story can be detected", async () => {
+    const body =
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "Hi" }, finish_reason: null }] })}\n\n` +
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "length" }] })}\n\n` +
+      "data: [DONE]\n\n";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(body, { status: 200 })));
+    const a = new OpenAICompatAdapter({ baseUrl: "http://localhost:11434/v1", model: "m" });
+    expect(await collect(a.chat({ messages: [] }))).toBe("Hi");
+    expect(a.lastFinishReason).toBe("length");
     vi.unstubAllGlobals();
   });
 

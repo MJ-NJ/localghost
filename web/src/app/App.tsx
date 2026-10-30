@@ -220,7 +220,7 @@ export function App() {
           );
           setVision(null);
           if (v.unsupported) {
-            const msg = "This model could not read your photos, so the story uses your notes only.";
+            const msg = `This model could not read your photos, so the story uses your notes only. Server said: ${(v.detail ?? "").slice(0, 200)}`;
             setNotice(msg);
             timing.note(msg);
           } else if (Object.keys(v.inventories).length) {

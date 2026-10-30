@@ -83,6 +83,25 @@ describe("leniency", () => {
   });
 });
 
+describe("forgiving common model slips", () => {
+  it("accepts plural/singular sfx names", () => {
+    expect(parse("[sfx scrapes] [sfx footstep] [sfx knocks] [sfx whisper]").events).toEqual([
+      { kind: "sfx", name: "scrape" },
+      { kind: "sfx", name: "footsteps" },
+      { kind: "sfx", name: "knock" },
+      { kind: "sfx", name: "whispers" },
+    ]);
+  });
+  it("accepts [lights pulse] as [light pulse]", () => {
+    expect(parse("[lights pulse]").events).toEqual([{ kind: "light", mode: "pulse" }]);
+  });
+  it("still drops things that are not near-misses", () => {
+    const { events, stats } = parse("[sfx cold breath] [sfx stop] [whispers]");
+    expect(events).toEqual([]);
+    expect(stats.unknownTags).toBe(3);
+  });
+});
+
 describe("pause clamping and defaults", () => {
   it("clamps to 0.2-6", () => {
     expect(parse("[pause 0]").events).toEqual([{ kind: "pause", seconds: 0.2 }]);

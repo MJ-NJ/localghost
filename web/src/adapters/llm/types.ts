@@ -17,6 +17,8 @@ export interface ChatRequest {
 export interface LLMAdapter {
   id: string;
   caps: { vision: boolean; streaming: boolean; local: boolean };
+  /** Why the last chat() stopped: "stop" (finished) or "length" (hit max_tokens / context). null if unknown. */
+  lastFinishReason?: string | null;
   chat(req: ChatRequest, signal?: AbortSignal): AsyncIterable<string>;
 }
 

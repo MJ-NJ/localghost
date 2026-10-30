@@ -10,15 +10,15 @@ import {
   PAUSE_MAX,
   PAUSE_MIN,
   PHOTO_VERB,
-  SFX_NAMES,
   STYLES,
   TAG,
+  TAG_ALIASES,
+  normalizeSfx,
   clamp,
   type AmbientMode,
   type CueEvent,
   type LightMode,
   type NonVerbal,
-  type SfxName,
   type Style,
   type StyleTag,
 } from "./spec";
@@ -127,8 +127,9 @@ export class CueParser {
 
   private parseTag(inner: string): CueEvent | { setStyle: StyleTag } | null {
     const words = inner.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    const [name, ...args] = words;
-    if (!name) return null;
+    const [rawName, ...args] = words;
+    if (!rawName) return null;
+    const name = TAG_ALIASES[rawName] ?? rawName;
 
     if (includes(STYLES, name)) return { setStyle: name };
     if (includes(NONVERBALS, name)) return { kind: "nonverbal", nv: name as NonVerbal };
@@ -144,8 +145,8 @@ export class CueParser {
         return { kind: "pause", seconds: clamp(n, PAUSE_MIN, PAUSE_MAX) };
       }
       case TAG.sfx: {
-        const sfx = args[0];
-        return sfx && includes(SFX_NAMES, sfx) ? { kind: "sfx", name: sfx as SfxName } : null;
+        const sfx = args[0] && normalizeSfx(args[0]);
+        return sfx ? { kind: "sfx", name: sfx } : null;
       }
       case TAG.light: {
         const mode = args[0];
