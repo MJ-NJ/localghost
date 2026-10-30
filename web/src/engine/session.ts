@@ -45,6 +45,7 @@ export class StorySession {
   private readonly waiters: Array<{ resolve: () => void; reject: (e: Error) => void }> = [];
   private readySegments = 0;
   private synthMs = 0;
+  private startedAt: number | null = null;
 
   constructor(readonly events: CueEvent[]) {
     this.totalSegments = events.filter((e) => e.kind === "speech").length;
@@ -61,8 +62,18 @@ export class StorySession {
       readySegments: this.readySegments,
       totalSegments: this.totalSegments,
       readySeconds: this.builder.frontier,
-      avgSynthSec: this.readySegments ? this.synthMs / this.readySegments / 1000 : 0,
+      avgSynthSec: this.readySegments ? this.secondsPerSegment() : 0,
     };
+  }
+
+  /** Call when synthesis begins. With parallel workers throughput is wall-clock time per finished segment. */
+  markSynthStart() {
+    this.startedAt = performance.now();
+  }
+
+  private secondsPerSegment(): number {
+    if (this.startedAt !== null) return (performance.now() - this.startedAt) / this.readySegments / 1000;
+    return this.synthMs / this.readySegments / 1000; // no start mark: sum of per-call times
   }
 
   addBuffer(ev: CueEvent, buf: AudioBuffer, synthMs: number) {
@@ -101,24 +112,39 @@ export interface SynthesizeOptions {
   adapter: TTSAdapter;
   voice: string;
   signal?: AbortSignal;
+  /** Segments synthesized at the same time (one per Kokoro worker). Playback order is unaffected. */
+  concurrency?: number;
   onProgress?: (done: number, total: number) => void;
 }
 
-/** Synthesize every speech event in order (Kokoro concurrency 1), feeding the session as each finishes. */
+/**
+ * Synthesize every speech event, feeding the session as each finishes. Segments are started in order, so with
+ * concurrency > 1 they can finish out of order; the timeline builder waits for the next one it needs.
+ */
 export async function synthesizeInto(session: StorySession, o: SynthesizeOptions): Promise<void> {
   const stop = timing.start("prerender total");
-  try {
-    let done = 0;
-    o.onProgress?.(0, session.totalSegments);
-    for (const ev of session.events) {
-      if (ev.kind !== "speech") continue;
+  const speech = session.events.filter((e): e is Extract<CueEvent, { kind: "speech" }> => e.kind === "speech");
+  let next = 0;
+  let done = 0;
+  let failed = false;
+  session.markSynthStart();
+  o.onProgress?.(0, session.totalSegments);
+
+  const lane = async () => {
+    while (!failed && next < speech.length) {
+      const ev = speech[next++];
       const t0 = performance.now();
       const buf = await o.adapter.synth({ text: ev.text, style: ev.style, voice: o.voice }, o.signal);
       session.addBuffer(ev, buf, performance.now() - t0);
       o.onProgress?.(++done, session.totalSegments);
     }
+  };
+
+  try {
+    await Promise.all(Array.from({ length: Math.max(1, o.concurrency ?? 1) }, lane));
     stop();
   } catch (e) {
+    failed = true;
     session.fail(e instanceof Error ? e : new Error(String(e)));
     throw e;
   }

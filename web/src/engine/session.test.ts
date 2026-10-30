@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CueEvent } from "../cue/spec";
-import { MIN_BUFFER_SECONDS, StorySession, shouldStart } from "./session";
+import type { TTSAdapter } from "../adapters/tts/types";
+import { MIN_BUFFER_SECONDS, StorySession, shouldStart, synthesizeInto } from "./session";
 import { PACING, TimelineBuilder } from "./timeline";
 
 const buf = (duration: number) => ({ duration }) as AudioBuffer;
@@ -107,5 +108,50 @@ describe("StorySession", () => {
     const p = s.ready();
     s.fail(new Error("boom"));
     await expect(p).rejects.toThrow("boom");
+  });
+});
+
+describe("synthesizeInto with parallel workers", () => {
+  /** Adapter whose segments finish in reverse order, to prove the timeline still comes out in order. */
+  const adapter = (delays: Record<string, number>, active: { now: number; max: number }): TTSAdapter => ({
+    id: "kokoro-web",
+    label: "fake",
+    caps: { styles: new Set(), nonverbals: new Set(), offline: true, latency: "low", maxChars: 500 },
+    async synth(seg) {
+      active.now++;
+      active.max = Math.max(active.max, active.now);
+      await new Promise((r) => setTimeout(r, delays[seg.text] ?? 1));
+      active.now--;
+      return { duration: seg.text.length } as AudioBuffer;
+    },
+  });
+
+  it("runs up to `concurrency` at once and keeps playback order", async () => {
+    const evs = [speech("aaaa"), speech("bb"), speech("c"), speech("dddddd")];
+    const s = new StorySession(evs);
+    const active = { now: 0, max: 0 };
+    await synthesizeInto(s, {
+      adapter: adapter({ aaaa: 30, bb: 5, c: 15, dddddd: 1 }, active),
+      voice: "v",
+      concurrency: 2,
+    });
+    expect(active.max).toBe(2);
+    expect(s.complete).toBe(true);
+    const speechAt = s.builder.items.filter((i) => i.ev.kind === "speech").map((i) => (i.ev as { text: string }).text);
+    expect(speechAt).toEqual(["aaaa", "bb", "c", "dddddd"]);
+  });
+
+  it("defaults to one at a time", async () => {
+    const evs = [speech("aa"), speech("bb"), speech("cc")];
+    const active = { now: 0, max: 0 };
+    await synthesizeInto(new StorySession(evs), { adapter: adapter({}, active), voice: "v" });
+    expect(active.max).toBe(1);
+  });
+
+  it("fails the session if a worker fails", async () => {
+    const s = new StorySession([speech("aa"), speech("bb")]);
+    const bad: TTSAdapter = { ...adapter({}, { now: 0, max: 0 }), synth: async () => Promise.reject(new Error("boom")) };
+    await expect(synthesizeInto(s, { adapter: bad, voice: "v", concurrency: 2 })).rejects.toThrow("boom");
+    expect(s.error?.message).toBe("boom");
   });
 });
