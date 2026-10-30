@@ -173,12 +173,15 @@ export function App() {
     () => new ElevenLabsAdapter({ apiKey: eleven.apiKey, modelId: eleven.modelId }),
     [eleven.apiKey, eleven.modelId],
   );
-  const eleven_ = provider === "elevenlabs";
-  const tts: TTSAdapter = eleven_ ? elevenAdapter : adapter;
-  const ttsVoice = eleven_ ? eleven.voiceId : voice;
-  const concurrency = eleven_ ? elevenAdapter.caps.concurrency : adapter.workerCount;
+  /** Adapter, voice and concurrency for a provider. */
+  const voiceSetup = (p: TtsProvider) =>
+    p === "elevenlabs"
+      ? { tts: elevenAdapter as TTSAdapter, voice: eleven.voiceId, concurrency: elevenAdapter.caps.concurrency, tag: eleven.modelId }
+      : { tts: adapter as TTSAdapter, voice, concurrency: adapter.workerCount, tag: "" };
+  /** Try it now always uses the offline voice, so it works with no key and no setup. */
+  const providerFor = (source: Source): TtsProvider => (source === "sample" ? "kokoro-web" : provider);
   /** Identifies what a rendered session sounds like: same key means it can be replayed as is. */
-  const renderKey = (source: Source) => `${source}|${provider}|${ttsVoice}|${eleven_ ? eleven.modelId : ""}`;
+  const renderKey = (source: Source, p: TtsProvider) => `${source}|${p}|${voiceSetup(p).voice}|${voiceSetup(p).tag}`;
 
   const refreshCacheSize = useCallback(() => void audioCacheSize().then(setCacheSize).catch(() => {}), []);
   useEffect(refreshCacheSize, [refreshCacheSize]);
@@ -206,8 +209,8 @@ export function App() {
     saveProvider(p);
   }
 
-  function assertVoiceReady() {
-    if (eleven_ && (!eleven.apiKey || !eleven.voiceId)) {
+  function assertVoiceReady(p: TtsProvider) {
+    if (p === "elevenlabs" && (!eleven.apiKey || !eleven.voiceId)) {
       throw new Error("Enter your ElevenLabs API key and choose a voice in Settings first, or switch the voice back to Kokoro.");
     }
   }
@@ -323,28 +326,44 @@ export function App() {
     setDraft("");
   };
 
-  /** Route a parsed story to the current voice, synthesize in the background, and start playing as soon as it is safe. */
-  async function render(events: CueEvent[], source: Source, ac: AbortController) {
+  /** Try it now: the demo photo for `[photo reveal sample]`. Missing file = no reveal (the story still plays). */
+  async function loadSampleReveal() {
+    revealImages.current.forEach((b) => b.close());
+    revealImages.current.clear();
+    try {
+      const res = await fetch(`${import.meta.env.BASE_URL}sample/sample_room.jpg`);
+      // a dev server answers a missing file with index.html, so check that it really is an image
+      if (res.ok && (res.headers.get("content-type") ?? "").startsWith("image/")) {
+        revealImages.current.set("sample", await createImageBitmap(await res.blob()));
+      }
+    } catch {
+      /* no sample photo: skip the reveal */
+    }
+  }
+
+  /** Route a parsed story to the voice for `p`, synthesize in the background, and start playing as soon as it is safe. */
+  async function render(events: CueEvent[], source: Source, ac: AbortController, p: TtsProvider) {
     lastEvents.current = events;
     lastSource.current = source;
-    const key = renderKey(source);
-    const segments = routeForAdapter(events, tts);
+    const v = voiceSetup(p);
+    const key = renderKey(source, p);
+    const segments = routeForAdapter(events, v.tts);
 
     setPhase("summoning");
     setDraft("");
     const synthStart = performance.now();
-    const session = new StorySession(segments, tts.caps.styles);
+    const session = new StorySession(segments, v.tts.caps.styles);
     // Synthesis continues in the background while the story plays (streaming playback).
     const synth = synthesizeInto(session, {
-      adapter: tts,
-      voice: ttsVoice,
+      adapter: v.tts,
+      voice: v.voice,
       signal: ac.signal,
-      concurrency,
+      concurrency: v.concurrency,
       onProgress: (d, t) => setPrerender([d, t, performance.now() - synthStart]),
     });
     synth.then(
       () => {
-        prepared.current = session; // complete: Replay / Play sample can reuse it
+        prepared.current = session; // complete: Replay / Try it now can reuse it
         preparedKey.current = key;
         setHasStory(true);
         refreshCacheSize();
@@ -370,12 +389,13 @@ export function App() {
     abort.current = ac;
     try {
       getPlayer();
-      assertVoiceReady();
-      if (!eleven_) {
+      assertVoiceReady(provider);
+      if (lastSource.current === "sample") await loadSampleReveal();
+      if (provider === "kokoro-web") {
         setPhase("loading");
         await ensureModel();
       }
-      await render(events, lastSource.current, ac);
+      await render(events, lastSource.current, ac, provider);
     } catch (e) {
       fail(e);
     }
@@ -387,35 +407,40 @@ export function App() {
     setDraft("");
     const ac = new AbortController();
     abort.current = ac;
+    // Try it now always uses the offline voice, so it works with no key and no setup.
+    const p = providerFor(source);
+    const cloud = p === "elevenlabs";
     try {
       getPlayer(); // create the AudioContext inside the user gesture
-      assertVoiceReady(); // fail before spending minutes on the story model
-      if (source === "sample" && prepared.current && preparedKey.current === renderKey("sample")) {
-        await run(prepared.current); // same script + voice: reuse the synthesis
-        return;
+      assertVoiceReady(p); // fail before spending minutes on the story model
+      if (source === "sample") {
+        if (provider !== p) changeProvider(p); // keep the Voice selector honest
+        await loadSampleReveal();
+        if (prepared.current && preparedKey.current === renderKey("sample", p)) {
+          await run(prepared.current); // same script + voice: reuse the synthesis
+          return;
+        }
       }
 
       let events: CueEvent[];
       if (source === "sample") {
-        if (!eleven_) {
-          setPhase("loading");
-          await ensureModel();
-        }
+        setPhase("loading");
+        await ensureModel();
         const res = await fetch(`${import.meta.env.BASE_URL}sample/sample.cue.txt`);
-        if (!res.ok) throw new Error(`Could not load the sample script (${res.status})`);
+        if (!res.ok) throw new Error(`Could not load the demo story (${res.status})`);
         const parsed = CueParser.parse(await res.text());
         if (parsed.stats.unknownTags) timing.count("unknown tags dropped", parsed.stats.unknownTags);
         events = parsed.events;
       } else {
         setNotice("");
         const llmAdapter = new OpenAICompatAdapter(llm);
-        const voiceLoad = eleven_ ? Promise.resolve() : ensureModel(); // load Kokoro while the model works
+        const voiceLoad = cloud ? Promise.resolve() : ensureModel(); // load Kokoro while the model works
         voiceLoad.catch(() => {}); // surfaced below if it is still failing when we need it
 
         // Auto length needs Kokoro's speed on this machine; time it once (then it is remembered).
         // A cloud voice is fast, so it gets the full length.
-        let rtf = eleven_ ? undefined : (bench ?? undefined);
-        if (!eleven_ && lengthMode === "auto" && rtf === undefined) {
+        let rtf = cloud ? undefined : (bench ?? undefined);
+        if (!cloud && lengthMode === "auto" && rtf === undefined) {
           setPhase("loading");
           rtf = await runBenchmark();
         }
@@ -445,7 +470,7 @@ export function App() {
           setPhase("looking");
           const v = await analysePhotos(
             llmAdapter,
-            await Promise.all(photos.map(async (p) => ({ id: p.id, hash: p.hash, dataUrl: await photoDataUrl(p) }))),
+            await Promise.all(photos.map(async (ph) => ({ id: ph.id, hash: ph.hash, dataUrl: await photoDataUrl(ph) }))),
             {
               cache: { get: getInventory, set: setInventory },
               signal: ac.signal,
@@ -460,7 +485,7 @@ export function App() {
           } else if (Object.keys(v.inventories).length) {
             inventory = JSON.stringify(v.inventories);
             bestPhotoId = v.bestId;
-            const best = photos.find((p) => p.id === bestPhotoId);
+            const best = photos.find((ph) => ph.id === bestPhotoId);
             if (best) revealImages.current.set(best.id, await createImageBitmap(best.blob));
           }
         }
@@ -480,13 +505,13 @@ export function App() {
           throw new Error("The model returned no spoken text. Try again, or try a different model.");
         }
         events = result.events;
-        if (!eleven_) {
+        if (!cloud) {
           setPhase("loading");
           await voiceLoad;
         }
       }
 
-      await render(events, source, ac);
+      await render(events, source, ac, p);
     } catch (e) {
       fail(e);
     }
@@ -511,7 +536,7 @@ export function App() {
   const replay = () => {
     const events = lastEvents.current;
     if (!events) return;
-    if (prepared.current && preparedKey.current === renderKey(lastSource.current)) {
+    if (prepared.current && preparedKey.current === renderKey(lastSource.current, provider)) {
       setLine(null);
       void run(prepared.current);
     } else {
@@ -611,7 +636,7 @@ export function App() {
         )}
       </>
     ) : !line && !active ? (
-      "The Stage. Nothing is summoned yet."
+      "A ghost story, told aloud, in your own place. Try the demo, or connect a local model to write one of your own."
     ) : null;
 
   const controls = pendingSource ? (
@@ -644,10 +669,10 @@ export function App() {
     <button onClick={stop}>Stop</button>
   ) : active ? null : (
     <>
-      <button className="primary" onClick={() => request("story")}>
-        Tell me a story
+      <button className="primary" onClick={() => request("sample")}>
+        Try it now — no setup
       </button>{" "}
-      <button onClick={() => request("sample")}>Play sample</button>{" "}
+      <button onClick={() => request("story")}>Tell me a story</button>{" "}
       {hasStory && <button onClick={replay}>Replay</button>}
       <div className="voice-toggle">
         <label>

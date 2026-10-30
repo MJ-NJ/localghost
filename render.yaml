@@ -1,0 +1,28 @@
+# Render Blueprint: Localghost is a static site (no backend). Build in web/, publish web/dist.
+services:
+  - type: web
+    name: localghost
+    runtime: static
+    buildCommand: cd web && npm ci && npm run build
+    staticPublishPath: ./web/dist
+    envVars:
+      - key: NODE_VERSION
+        value: 22.17.1
+    # These two headers enable multi-threaded WebAssembly (cross-origin isolation), which makes the
+    # in-browser voice several times faster. "credentialless" keeps Google Fonts and the model
+    # download working without extra headers. Without them the site still works, just slower.
+    headers:
+      - path: /*
+        name: Cross-Origin-Opener-Policy
+        value: same-origin
+      - path: /*
+        name: Cross-Origin-Embedder-Policy
+        value: credentialless
+    # Single-page app: send unknown paths to index.html
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    # Custom domain: uncomment and set once the .tech domain is bought, then add the CNAME shown in the README.
+    # domains:
+    #   - your-name.tech
