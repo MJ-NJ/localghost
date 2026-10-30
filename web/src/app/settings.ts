@@ -6,6 +6,8 @@ export interface LLMSettings {
   baseUrl: string;
   model: string;
   apiKey: string;
+  /** Send photos to the model? auto = ask the server whether the model can see; on/off = your call. */
+  images: "auto" | "on" | "off";
 }
 
 const KEY = "llmSettings";
@@ -15,6 +17,7 @@ export const DEFAULT_LLM_SETTINGS: LLMSettings = {
   baseUrl: LLM_PRESETS[0].baseUrl,
   model: DEFAULT_MODEL,
   apiKey: "",
+  images: "auto",
 };
 
 export function loadLLMSettings(): LLMSettings {

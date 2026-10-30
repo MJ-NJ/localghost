@@ -185,3 +185,11 @@ User feedback after M1: voice "robotic", pauses "like a paragraph reading". Prob
 
 ## ADR-029 The local `gemma-4-E4B` cannot see images (Accepted, 2026-10-30)
 - Ollama returned `400: Multimodal data provided, but model does not support multimodal requests` for the vision call. The no-vision fallback behaved as designed. This is a property of this particular Ollama model (a GGUF import without its vision projector, most likely), not necessarily of the Gemma family. Fix by using a build that includes the projector (check `ollama show <tag>` for a vision capability) or a server that loads it explicitly (LM Studio, llama.cpp `-hf`).
+
+## ADR-030 Photos are sent only to models that can read them (Accepted, user-requested; freezes the vision layer)
+- **Setting:** "Read my photos with this model": **Auto** (default), **Yes**, **No**. Persisted in `llmSettings.images`.
+- **Auto:** before the vision pass the app asks the server. Ollama: `POST /api/show` and look for `vision` in `capabilities`. llama.cpp: `GET /props` and `modalities.vision`. Other servers (LM Studio, custom) cannot be asked, so the result is "unknown".
+- **Decision table:** detected *no* -> photos skipped, a notice says so, no request carrying an image is ever sent. Detected *yes* or *unknown* -> the vision pass runs; for *unknown*, the earlier safety net still applies (an HTTP error on an image request means "model can't see", ADR-023). "Yes" skips detection; "No" skips photos.
+- **Settings:** a "Check model for image support" button shows the result; it resets when the model or URL changes.
+- **Limits:** the server API is only reachable if CORS allows `/api/show` (same `OLLAMA_ORIGINS` as `/v1`); older Ollama versions do not list `capabilities` (result "unknown"). A model that accepts images but ignores them still cannot be detected.
+- **Open question (not built):** in the notes-only path the photo reveal is also skipped (ADR-023). The reveal itself needs no vision, so it could still fire at the climax with the listener's own photo even when the model can't read it. Not changed without sign-off.

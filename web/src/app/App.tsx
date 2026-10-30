@@ -3,6 +3,7 @@ import { CueParser } from "../cue/parser";
 import { segment } from "../cue/segmenter";
 import type { Style } from "../cue/spec";
 import { OpenAICompatAdapter, hostOf } from "../adapters/llm/openaiCompat";
+import { detectVision, type VisionSupport } from "../adapters/llm/capabilities";
 import { direct, countSpeechWords } from "../director/director";
 import { lengthFactor, scaledWords, type LengthMode } from "../director/length";
 import { profileFor } from "../director/profiles";
@@ -113,6 +114,8 @@ export function App() {
   const [lengthMode, setLengthMode] = useState<LengthMode>(() => readLengthMode());
   const [bench, setBench] = useState<number | null>(null); // measured synthesis seconds per audio second
   const [benching, setBenching] = useState(false);
+  const [visionSupport, setVisionSupport] = useState<VisionSupport | undefined>(undefined);
+  const [checkingVision, setCheckingVision] = useState(false);
   const [reduceFlashing, setReduceFlashing] = useState(() => readFlag("reduceFlashing"));
   const [hasStory, setHasStory] = useState(false);
   const [photos, setPhotos] = useState<StoredPhoto[]>([]);
@@ -182,6 +185,16 @@ export function App() {
     setNotesState(v);
     window.clearTimeout(notesTimer.current);
     notesTimer.current = window.setTimeout(() => void setNotes(v).catch(() => {}), 400);
+  }
+
+  useEffect(() => setVisionSupport(undefined), [llm.baseUrl, llm.model]);
+
+  async function checkVision(): Promise<VisionSupport> {
+    setCheckingVision(true);
+    const r = await detectVision(llm);
+    setVisionSupport(r);
+    setCheckingVision(false);
+    return r;
   }
 
   const getPlayer = () => (player.current ??= new Player(new AudioContext()));
@@ -282,7 +295,20 @@ export function App() {
         let bestPhotoId: PhotoId | undefined;
         revealImages.current.forEach((b) => b.close());
         revealImages.current.clear();
-        if (photos.length) {
+        let useVision = photos.length > 0;
+        if (useVision && llm.images === "off") {
+          useVision = false;
+          setNotice("Photos are turned off in Settings, so the story uses your notes only.");
+        } else if (useVision && llm.images === "auto") {
+          // unknown (null) still tries: the server's own refusal is caught below
+          if ((await checkVision()) === false) {
+            useVision = false;
+            const msg = "The selected model reports no image support, so the story uses your notes only.";
+            setNotice(msg);
+            timing.note(msg);
+          }
+        }
+        if (useVision) {
           setPhase("looking");
           const v = await analysePhotos(
             llmAdapter,
@@ -570,6 +596,9 @@ export function App() {
                 device={device}
                 locked={busy || active}
                 onLoadVoiceModel={loadModel}
+                visionSupport={visionSupport}
+                checkingVision={checkingVision}
+                onCheckVision={() => void checkVision()}
                 workers={workers}
                 maxWorkers={MAX_WORKERS}
                 onWorkers={(n) => {

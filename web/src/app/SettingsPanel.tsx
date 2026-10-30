@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { LLM_PRESETS } from "../adapters/llm/presets";
 import { OpenAICompatAdapter } from "../adapters/llm/openaiCompat";
+import type { VisionSupport } from "../adapters/llm/capabilities";
 import type { VoiceInfo } from "../adapters/tts/types";
 import type { LengthMode } from "../director/length";
 import type { LLMSettings } from "./settings";
@@ -15,6 +16,10 @@ export interface SettingsPanelProps {
   device: string;
   locked: boolean;
   onLoadVoiceModel(): void;
+  /** Result of the last "can this model see?" check: undefined = not checked. */
+  visionSupport: VisionSupport | undefined;
+  checkingVision: boolean;
+  onCheckVision(): void;
   /** Parallel Kokoro workers: each is a separate copy of the model (more memory, faster stories). */
   workers: number;
   maxWorkers: number;
@@ -92,6 +97,26 @@ export function SettingsPanel(p: SettingsPanelProps) {
         API key (optional, only sent to the URL above)
         <input type="password" autoComplete="off" value={p.llm.apiKey} onChange={(e) => set({ apiKey: e.target.value })} />
       </label>
+      <label>
+        Read my photos with this model
+        <select value={p.llm.images} onChange={(e) => set({ images: e.target.value as LLMSettings["images"] })}>
+          <option value="auto">Auto (ask the server)</option>
+          <option value="on">Yes, my model can see images</option>
+          <option value="off">No, use notes only</option>
+        </select>
+      </label>
+      <button onClick={p.onCheckVision} disabled={p.checkingVision || !p.llm.model.trim()}>
+        {p.checkingVision ? "Checking…" : "Check model for image support"}
+      </button>
+      {p.visionSupport !== undefined && (
+        <div className="badge">
+          {p.visionSupport === true
+            ? "This model reports image support."
+            : p.visionSupport === false
+              ? "This model reports no image support: photos will be skipped in Auto mode."
+              : "The server did not say. In Auto mode photos are tried, and skipped if the model refuses them."}
+        </div>
+      )}
       {err != null && <ErrorView error={err} />}
 
       <h3>Voice</h3>
