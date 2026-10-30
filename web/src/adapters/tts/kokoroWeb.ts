@@ -1,6 +1,8 @@
-import type { Style, TTSAdapter, VoiceInfo } from "./types";
+import type { NonVerbal, Style, TTSAdapter, VoiceInfo } from "./types";
 import type { WorkerRequest, WorkerResponse } from "./kokoro.worker";
+import { cacheKey, idbAudioCache, type AudioCache } from "../../lib/cache";
 import { measureMemoryMB } from "../../lib/memory";
+import { kokoroSpeed } from "./styleMap";
 import { timing } from "../../lib/timing";
 
 export interface KokoroProgress {
@@ -18,10 +20,6 @@ export interface KokoroStatus {
   workers: number;
 }
 
-/** Kokoro's `speed` per style. Whisper/trembling/shout are emulated in the audio graph (M2/M5), not here. */
-const BASE_SPEED = 0.92; // narration reads less rushed than Kokoro's default 1.0 (ADR-010)
-const SPEED: Partial<Record<Style, number>> = { slow: 0.78 };
-
 /**
  * Kokoro pads every clip with silence of unpredictable length, which makes pacing
  * sound mechanical. Trim it so the timeline controls all gaps (ADR-010).
@@ -35,6 +33,9 @@ export function trimSilence(x: Float32Array, sampleRate: number, threshold = 0.0
   const keep = Math.floor((sampleRate * keepMs) / 1000);
   return x.subarray(Math.max(0, a - keep), Math.min(x.length, b + keep));
 }
+
+/** Bump when anything that changes the audio of a segment changes (trim settings, model, dtype). */
+const KOKORO_CACHE_VERSION = "q8-trim0.004-40ms";
 
 /** Provisional default; chosen from the voice list by grade, not by ear. Verify by listening. */
 export const DEFAULT_KOKORO_VOICE = "bm_george";
@@ -60,6 +61,12 @@ interface Inflight {
   reject(e: Error): void;
 }
 
+function pcmToBuffer(samples: Float32Array, sampleRate: number): AudioBuffer {
+  const buf = new AudioBuffer({ length: samples.length, sampleRate, numberOfChannels: 1 });
+  buf.copyToChannel(samples as Float32Array<ArrayBuffer>, 0);
+  return buf;
+}
+
 const abortError = () => new DOMException("aborted", "AbortError");
 
 export class KokoroWebAdapter implements TTSAdapter {
@@ -71,6 +78,8 @@ export class KokoroWebAdapter implements TTSAdapter {
     offline: true,
     latency: "low" as const,
     maxChars: 500,
+    targetChars: 0,
+    concurrency: 1, // overridden by the worker count
   };
 
   voices: VoiceInfo[] = [];
@@ -86,6 +95,7 @@ export class KokoroWebAdapter implements TTSAdapter {
   constructor(
     private readonly onProgress?: (p: KokoroProgress) => void,
     readonly workerCount = 1,
+    private readonly cache: AudioCache = idbAudioCache,
   ) {}
 
   dispose() {
@@ -175,7 +185,25 @@ export class KokoroWebAdapter implements TTSAdapter {
     return new Promise((resolve, reject) => this.waiters.push({ resolve, reject }));
   }
 
-  async synth(seg: { text: string; style: Style; voice: string }, signal?: AbortSignal): Promise<AudioBuffer> {
+  synth(
+    seg: { text: string; style: Style; leadingNonverbal?: NonVerbal; voice: string },
+    signal?: AbortSignal,
+  ): Promise<AudioBuffer> {
+    return this.synthWith(seg, signal, true);
+  }
+
+  private async synthWith(
+    seg: { text: string; style: Style; leadingNonverbal?: NonVerbal; voice: string },
+    signal: AbortSignal | undefined,
+    useCache: boolean,
+  ): Promise<AudioBuffer> {
+    const speed = kokoroSpeed(seg.style);
+    const key = await cacheKey("kokoro-web", KOKORO_CACHE_VERSION, seg.voice, seg.style, seg.leadingNonverbal, speed, seg.text);
+    if (useCache) {
+      const hit = await this.cache.get(key);
+      if (hit?.kind === "pcm") return pcmToBuffer(hit.samples, hit.sampleRate); // no model needed for a cached segment
+    }
+
     await this.load();
     if (signal?.aborted) throw abortError();
     const slot = await this.acquire();
@@ -196,19 +224,12 @@ export class KokoroWebAdapter implements TTSAdapter {
         f.reject(abortError());
       }
     });
-    slot.worker.postMessage({
-      type: "synth",
-      id,
-      text: seg.text,
-      voice: seg.voice,
-      speed: SPEED[seg.style] ?? BASE_SPEED,
-    } satisfies WorkerRequest);
+    slot.worker.postMessage({ type: "synth", id, text: seg.text, voice: seg.voice, speed } satisfies WorkerRequest);
 
     const { samples: raw, sampleRate } = await result;
     const samples = trimSilence(raw, sampleRate);
-    const buf = new AudioBuffer({ length: samples.length, sampleRate, numberOfChannels: 1 });
-    buf.copyToChannel(samples as Float32Array<ArrayBuffer>, 0);
-    return buf;
+    if (useCache) void this.cache.put(key, { kind: "pcm", sampleRate, samples: samples.slice() });
+    return pcmToBuffer(samples, sampleRate);
   }
 
   /**
@@ -218,9 +239,10 @@ export class KokoroWebAdapter implements TTSAdapter {
   async benchmark(voice: string): Promise<BenchmarkResult> {
     await this.load();
     const seg = { text: BENCHMARK_TEXT, style: "normal" as const, voice };
-    await this.synth(seg); // warm-up: JIT, first-run allocations
+    // the speed test must never be served from the cache, or it would time a database read
+    await this.synthWith(seg, undefined, false); // warm-up: JIT, first-run allocations
     const t0 = performance.now();
-    const bufs = await Promise.all(Array.from({ length: this.workerCount }, () => this.synth(seg)));
+    const bufs = await Promise.all(Array.from({ length: this.workerCount }, () => this.synthWith(seg, undefined, false)));
     const wallSec = (performance.now() - t0) / 1000;
     const audioSec = bufs.reduce((n, b) => n + b.duration, 0);
     const rtf = wallSec / audioSec;

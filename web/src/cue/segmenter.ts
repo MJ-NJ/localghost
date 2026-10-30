@@ -56,15 +56,23 @@ export function segment(events: CueEvent[], opts: SegmentOptions): CueEvent[] {
       out.push(ev);
       continue;
     }
-    for (const sentence of splitSentences(ev.text).flatMap((s) => hardSplit(s, opts.maxChars))) {
+    const sentences = splitSentences(ev.text).flatMap((s) => hardSplit(s, opts.maxChars));
+    sentences.forEach((sentence, i) => {
+      // a non-verbal belongs to the first sentence only, and a segment that starts with one never merges into the previous
+      const nv = i === 0 ? ev.leadingNonverbal : undefined;
       const p: SpeechEvent | null = pending;
-      if (p && p.style === (ev.style as Style) && p.text.length + 1 + sentence.length <= Math.min(opts.targetChars, opts.maxChars)) {
+      if (
+        p &&
+        !nv &&
+        p.style === (ev.style as Style) &&
+        p.text.length + 1 + sentence.length <= Math.min(opts.targetChars, opts.maxChars)
+      ) {
         p.text += " " + sentence;
       } else {
         flush();
-        pending = { kind: "speech", text: sentence, style: ev.style };
+        pending = { kind: "speech", text: sentence, style: ev.style, ...(nv ? { leadingNonverbal: nv } : {}) };
       }
-    }
+    });
   }
   flush();
   return out;

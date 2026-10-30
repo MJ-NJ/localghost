@@ -116,7 +116,7 @@ describe("synthesizeInto with parallel workers", () => {
   const adapter = (delays: Record<string, number>, active: { now: number; max: number }): TTSAdapter => ({
     id: "kokoro-web",
     label: "fake",
-    caps: { styles: new Set(), nonverbals: new Set(), offline: true, latency: "low", maxChars: 500 },
+    caps: { styles: new Set(), nonverbals: new Set(), offline: true, latency: "low", maxChars: 500, targetChars: 0, concurrency: 1 },
     async synth(seg) {
       active.now++;
       active.max = Math.max(active.max, active.now);

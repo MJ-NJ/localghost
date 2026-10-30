@@ -16,6 +16,10 @@ export interface TTSAdapter {
     offline: boolean;
     latency: "low" | "high";
     maxChars: number;
+    /** Soft merge target for the segmenter: 0 = one sentence per segment (Kokoro), else about this many chars. */
+    targetChars: number;
+    /** Segments synthesized at once. */
+    concurrency: number;
   };
   synth(
     seg: { text: string; style: Style; leadingNonverbal?: NonVerbal; voice: string },

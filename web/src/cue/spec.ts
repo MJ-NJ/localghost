@@ -64,7 +64,7 @@ export const BLACKOUT_MAX = PAUSE_MAX;
 export const BLACKOUT_DEFAULT = 2;
 
 export type CueEvent =
-  | { kind: "speech"; text: string; style: Style }
+  | { kind: "speech"; text: string; style: Style; leadingNonverbal?: NonVerbal }
   | { kind: "nonverbal"; nv: NonVerbal }
   | { kind: "pause"; seconds: number }
   | { kind: "sfx"; name: SfxName }
