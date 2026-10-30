@@ -4,6 +4,8 @@ import { segment } from "../cue/segmenter";
 import type { Style } from "../cue/spec";
 import { OpenAICompatAdapter, hostOf } from "../adapters/llm/openaiCompat";
 import { direct, countSpeechWords } from "../director/director";
+import { lengthFactor, scaledWords, type LengthMode } from "../director/length";
+import { profileFor } from "../director/profiles";
 import { DEFAULT_KOKORO_VOICE, KokoroWebAdapter, type KokoroProgress } from "../adapters/tts/kokoroWeb";
 import type { VoiceInfo } from "../adapters/tts/types";
 import { Effects } from "../engine/effects";
@@ -50,6 +52,43 @@ const writeFlag = (key: string, on: boolean) => {
   }
 };
 
+const MAX_WORKERS = 3;
+
+function readNumber(key: string, fallback: number, min: number, max: number) {
+  try {
+    const n = Number(localStorage.getItem(key));
+    return Number.isInteger(n) && n >= min && n <= max ? n : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function readLengthMode(): LengthMode {
+  try {
+    const v = localStorage.getItem("storyLength");
+    return v === "short" || v === "full" ? v : "auto";
+  } catch {
+    return "auto";
+  }
+}
+
+const readBench = (workers: number): number | null => {
+  try {
+    const b = JSON.parse(localStorage.getItem("kokoroBench") ?? "null") as { workers: number; rtf: number } | null;
+    return b && b.workers === workers && Number.isFinite(b.rtf) ? b.rtf : null;
+  } catch {
+    return null;
+  }
+};
+
+const saveBench = (workers: number, rtf: number) => {
+  try {
+    localStorage.setItem("kokoroBench", JSON.stringify({ workers, rtf }));
+  } catch {
+    /* storage unavailable */
+  }
+};
+
 const formatEta = (ms: number) => {
   const s = Math.max(1, Math.round(ms / 1000));
   return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`;
@@ -70,6 +109,10 @@ export function App() {
   const [llm, setLlm] = useState<LLMSettings>(loadLLMSettings);
   const [pendingSource, setPendingSource] = useState<Source | null>(null);
   const [device, setDevice] = useState("");
+  const [workers, setWorkers] = useState(() => readNumber("kokoroWorkers", 1, 1, MAX_WORKERS));
+  const [lengthMode, setLengthMode] = useState<LengthMode>(() => readLengthMode());
+  const [bench, setBench] = useState<number | null>(null); // measured synthesis seconds per audio second
+  const [benching, setBenching] = useState(false);
   const [reduceFlashing, setReduceFlashing] = useState(() => readFlag("reduceFlashing"));
   const [hasStory, setHasStory] = useState(false);
   const [photos, setPhotos] = useState<StoredPhoto[]>([]);
@@ -96,8 +139,11 @@ export function App() {
   const preparedKey = useRef<string | null>(null);
   const [hudVisible, setHudVisible] = useState(true);
   const lineN = useRef(0);
-  const adapter = useMemo(() => new KokoroWebAdapter(setProgress), []);
-  useEffect(() => () => adapter.dispose(), [adapter]);
+  const adapter = useMemo(() => new KokoroWebAdapter(setProgress, workers), [workers]);
+  useEffect(() => {
+    setBench(readBench(workers));
+    return () => adapter.dispose();
+  }, [adapter, workers]);
 
   useEffect(() => {
     if (fxBlack.current && fxRed.current && fxVignette.current) {
@@ -169,7 +215,26 @@ export function App() {
   async function ensureModel() {
     await adapter.load();
     setVoices(adapter.voices);
-    if (adapter.status) setDevice(`${adapter.status.device}/${adapter.status.dtype}, ${adapter.status.isolated ? "multi-threaded" : "single-threaded (not cross-origin isolated)"}`);
+    if (adapter.status) setDevice(`${adapter.status.device}/${adapter.status.dtype}, ${adapter.status.isolated ? "multi-threaded" : "single-threaded (not cross-origin isolated)"}, ${adapter.status.workers} worker${adapter.status.workers > 1 ? "s" : ""}`);
+  }
+
+  async function runBenchmark(): Promise<number> {
+    await ensureModel();
+    const r = await adapter.benchmark(voice);
+    saveBench(workers, r.rtf);
+    setBench(r.rtf);
+    return r.rtf;
+  }
+
+  async function speedTest() {
+    setError(null);
+    setBenching(true);
+    try {
+      await runBenchmark();
+    } catch (e) {
+      setError(e);
+    }
+    setBenching(false);
   }
 
   const isAbort = (e: unknown) => e instanceof DOMException && e.name === "AbortError";
@@ -201,6 +266,16 @@ export function App() {
         const llmAdapter = new OpenAICompatAdapter(llm);
         const voiceLoad = ensureModel(); // load the voice while the model works
         voiceLoad.catch(() => {}); // surfaced below if it is still failing when we need it
+
+        // Auto length needs the voice's speed on this machine; time it once (then it is remembered).
+        let rtf = bench ?? undefined;
+        if (lengthMode === "auto" && rtf === undefined) {
+          setPhase("loading");
+          rtf = await runBenchmark();
+        }
+        const factor = lengthFactor(lengthMode, profileFor(level), rtf);
+        const [minW, maxW] = scaledWords(profileFor(level), factor);
+        timing.note(`story length: ${lengthMode}, x${factor.toFixed(2)} of the plan's range = ${minW}-${maxW} words`);
 
         // Vision pass: one call per photo, cached by photo hash, so unchanged photos cost nothing.
         let inventory: string | undefined;
@@ -238,6 +313,7 @@ export function App() {
           inventory,
           notes,
           bestPhotoId,
+          lengthFactor: factor,
           signal: ac.signal,
           onText: (d) => setDraft((t) => t + d),
         });
@@ -258,6 +334,7 @@ export function App() {
         adapter,
         voice,
         signal: ac.signal,
+        concurrency: adapter.workerCount,
         onProgress: (d, t) => setPrerender([d, t, performance.now() - synthStart]),
       });
       synth.then(
@@ -493,6 +570,30 @@ export function App() {
                 device={device}
                 locked={busy || active}
                 onLoadVoiceModel={loadModel}
+                workers={workers}
+                maxWorkers={MAX_WORKERS}
+                onWorkers={(n) => {
+                  try {
+                    localStorage.setItem("kokoroWorkers", String(n));
+                  } catch {
+                    /* storage unavailable */
+                  }
+                  setVoices([]);
+                  setDevice("");
+                  setWorkers(n);
+                }}
+                lengthMode={lengthMode}
+                onLengthMode={(m) => {
+                  try {
+                    localStorage.setItem("storyLength", m);
+                  } catch {
+                    /* storage unavailable */
+                  }
+                  setLengthMode(m);
+                }}
+                bench={bench}
+                benching={benching}
+                onSpeedTest={() => void speedTest()}
                 reduceFlashing={reduceFlashing}
                 onReduceFlashing={(on) => {
                   setReduceFlashing(on);

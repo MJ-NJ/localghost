@@ -3,6 +3,7 @@ import type { CueEvent } from "../cue/spec";
 import type { ChatMessage, LLMAdapter } from "../adapters/llm/types";
 import { timing } from "../lib/timing";
 import { profileFor } from "./profiles";
+import { pickPremise } from "./seeds";
 import { buildSystemPrompt, REPAIR_LINE, USER_MESSAGE, type PromptInput } from "./prompts";
 
 export const TEMPERATURE = 0.9;
@@ -10,7 +11,9 @@ export const TEMPERATURE = 0.9;
 export const MAX_TOKENS = 2048;
 export const MIN_SPEECH_WORDS = 10;
 
-export interface DirectorOptions extends Omit<PromptInput, "profile"> {
+export interface DirectorOptions extends Omit<PromptInput, "profile" | "premise"> {
+  /** Override the random premise (tests, replays). */
+  premise?: string;
   adapter: LLMAdapter;
   level: number;
   signal?: AbortSignal;
@@ -89,11 +92,15 @@ async function attempt(adapter: LLMAdapter, messages: ChatMessage[], o: Director
 
 /** Stream a story from the LLM, parse it incrementally, and retry once if the format is broken. */
 export async function direct(o: DirectorOptions): Promise<DirectorResult> {
+  const premise = o.premise ?? pickPremise();
+  timing.note(`premise: ${premise}`);
   const system = buildSystemPrompt({
     profile: profileFor(o.level),
     inventory: o.inventory,
     notes: o.notes,
     bestPhotoId: o.bestPhotoId,
+    lengthFactor: o.lengthFactor,
+    premise,
   });
   const messages = (user: string): ChatMessage[] => [
     { role: "system", content: system },

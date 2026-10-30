@@ -161,3 +161,27 @@ User feedback after M1: voice "robotic", pauses "like a paragraph reading". Prob
 - **Guaranteed ending:** if a story starts an ambient bed but never stops it, the director appends a 2 s pause and `[ambient stop]` so the drone fades out instead of cutting off.
 - **Diagnostics:** the adapter records `finish_reason`; if it is `length` the Debug tab says the story was cut off by the token limit (`max_tokens` 2048 or the server's context size, which Ollama defaults low). The Debug tab also lists per-story counts of words and tags. The no-vision notice now includes the server's own error text.
 - **Known and not fixed:** story length vs. synthesis speed. Kokoro WASM measured about 5-11 s per sentence against about 3-4 s of speech, so streaming has to buffer most of a long story before starting. See the open decisions about length and parallel synthesis.
+
+## ADR-026 Parallel Kokoro workers, behind a toggle (Provisional, unmeasured, user-requested)
+- **What:** Settings has "Voice workers" 1-3 (default **1 = off**, the plan's concurrency). Each worker is a separate copy of the model in its own Web Worker. Segments are started in order and may finish out of order; the timeline builder only advances when the next segment it needs exists, so playback order is unchanged (tested).
+- **Loading:** worker 1 loads first and downloads; the others then load in parallel from the browser cache. More workers mean a longer first load.
+- **Memory:** after the voice loads, the Debug tab records page memory (`performance.measureUserAgentSpecificMemory`, Chromium only, works because the page is cross-origin isolated). Compare 1, 2 and 3 workers there. Not measured by me yet.
+- **Start policy:** the throughput estimate is now wall-clock time per finished segment, so it is correct with several in flight.
+- **Risk, thread oversubscription:** each worker lets onnxruntime-web use up to 4 threads (`min(4, cores/2)`). Two workers on 16 logical cores are fine; three can oversubscribe, and the gain may flatten or reverse. I did not set per-worker thread counts because that needs importing `@huggingface/transformers` directly (not a declared dependency). Judge by the speed test number, not by assumption.
+- **Aborted clips:** a worker cannot cancel a clip in progress; it finishes it and then frees its slot, so Stop is instant for the UI but the worker is briefly busy.
+
+## ADR-027 Auto story length from a voice speed test (Provisional, user-approved, deviates from the plan's word counts)
+- **Why:** measured about 5-11 s of synthesis per sentence against 3-4 s of speech, so the plan's 350-800 words meant waits of many minutes.
+- **Speed test:** one warm-up clip, then one fixed sentence per worker at the same time; result = wall-clock synthesis seconds per audio second with all workers busy ("rtf"). Cached in `localStorage.kokoroBench` per worker count; runs automatically the first time Auto is used, or from the Settings button. **One sentence is a small sample**: real stories differ, and CPU load from Ollama at the same time is not part of the test.
+- **Formula (`director/length.ts`):** with streaming, the start wait is about `words x 0.43 s x (rtf - 1.5)`. Auto picks the words that keep this near **90 s**, then scales the level's range by that factor, floored at **x0.35**. At rtf <= 1.5 there is no limit (the plan's range). Constants (0.43 s/word, 1.5 playback multiplier, 90 s target, 0.35 floor) are estimates. Short = x0.5, Full = x1.
+- **Consequence:** on a slow machine every level gets shorter and the five levels become less distinct in length. The scare differences come from the other profile fields (jumps, effects budget, ending, ceiling).
+- Scaling affects only the prompt's "Length:" line; the model may still overshoot. The effects budget is not scaled.
+
+## ADR-028 Story shape, minimum lights and premise seeds (Provisional, user-approved, additions to the plan's prompt)
+- **Problem seen:** stories ended oddly and used few or no lights.
+- **Added to the director prompt:** a STORY SHAPE block (calm opening, three escalating wrong things, unmistakable climax, an ending that follows the level and must close the story, never stop mid-scene) and a per-level **minimum number of `[light]` cues** (L1:1, L2:2, L3:2, L4:3, L5:4; `minLights` in `profiles.ts`). The minimum is a request; the model can still ignore it, and the parser does not enforce it.
+- **Premise seeds:** one of 14 original one-line premises (`director/seeds.ts`) is picked at random per story and shown in the Debug tab. They are written in the spirit of common campfire tropes and are **not** taken from r/nosleep or any specific story. The prompt says the level's ending rule overrides the premise (so level 1 still resolves warmly). Cost: roughly 300 extra prompt tokens.
+- **Risk:** a seed that fits a level badly (a threatening seed at level 1) can make the model fight the ending rule; the premise text is deliberately mild.
+
+## ADR-029 The local `gemma-4-E4B` cannot see images (Accepted, 2026-10-30)
+- Ollama returned `400: Multimodal data provided, but model does not support multimodal requests` for the vision call. The no-vision fallback behaved as designed. This is a property of this particular Ollama model (a GGUF import without its vision projector, most likely), not necessarily of the Gemma family. Fix by using a build that includes the projector (check `ollama show <tag>` for a vision capability) or a server that loads it explicitly (LM Studio, llama.cpp `-hf`).

@@ -1,5 +1,6 @@
 import { AMBIENT_MODES, NONVERBALS, PHOTO_VERB, SFX_NAMES, STYLES, TAG, type LightMode } from "../cue/spec";
 import type { ScareProfile } from "./profiles";
+import { scaledWords } from "./length";
 
 export const USER_MESSAGE = "Begin.";
 export const REPAIR_LINE = "Your previous output broke the format. Output only the cue script.";
@@ -11,6 +12,10 @@ export interface PromptInput {
   notes?: string;
   /** Photo id to reveal at the climax, when photos exist (M4). */
   bestPhotoId?: string;
+  /** Scales the level's word range (1 = the plan's range). See director/length.ts. */
+  lengthFactor?: number;
+  /** A premise seed to build the story around (director/seeds.ts). */
+  premise?: string;
 }
 
 const lightArg = (m: LightMode) => (m === "blackout" ? "blackout N" : m);
@@ -44,6 +49,7 @@ function example(p: ScareProfile): string {
 
 export function buildSystemPrompt(i: PromptInput): string {
   const p = i.profile;
+  const [minWords, maxWords] = scaledWords(p, i.lengthFactor ?? 1);
   const photoRule = i.bestPhotoId
     ? `Use [${TAG.photo} ${PHOTO_VERB} ${i.bestPhotoId}] exactly once, at the climax.`
     : `Do not use [${TAG.photo} ${PHOTO_VERB}].`;
@@ -57,12 +63,22 @@ LISTENER'S NOTES:
 ${i.notes?.trim() || "None."}
 
 SCARE LEVEL ${p.level} — ${p.name}:
-- Length: ${p.words[0]}–${p.words[1]} words of spoken text.
+- Length: ${minWords}–${maxWords} words of spoken text.
 - Jump scares: ${p.jumps}. Build slowly; earn each one with silence first.
 - Effects budget: at most ${p.budget} [sfx]/[light] tags in total.
 - Ending: ${p.ending}.
 - Content limits: ${p.ceiling}. Never sexual content, never harm to children, never self-harm.
 
+STORY SHAPE (it must be complete and stand on its own):
+- Opening, about the first fifth: an ordinary, calm moment in the listener's place, told concretely.
+- Middle: three small wrong things, each stranger than the last, with silence between them.
+- Climax: the wrongness becomes unmistakable.
+- Ending: ${p.ending}. The last spoken line must close the story, not trail off, and you must not stop mid-scene.
+- Use [${TAG.light} ...] at least ${p.minLights} time${p.minLights === 1 ? "" : "s"}, timed to the tense moments.
+${i.premise ? `
+PREMISE (a seed: build the story around it and make it your own; never call it a premise; the ending rule above overrides it):
+${i.premise}
+` : ""}
 WRITING RULES:
 1. Second person, present tense ("You hear..."). Written for the ear: short sentences, rhythm, repetition.
 2. Set it in the listener's place. Use at least 3 concrete objects from the inventory, by name, where they are.

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { LLM_PRESETS } from "../adapters/llm/presets";
 import { OpenAICompatAdapter } from "../adapters/llm/openaiCompat";
 import type { VoiceInfo } from "../adapters/tts/types";
+import type { LengthMode } from "../director/length";
 import type { LLMSettings } from "./settings";
 import { ErrorView } from "./ErrorView";
 
@@ -14,6 +15,16 @@ export interface SettingsPanelProps {
   device: string;
   locked: boolean;
   onLoadVoiceModel(): void;
+  /** Parallel Kokoro workers: each is a separate copy of the model (more memory, faster stories). */
+  workers: number;
+  maxWorkers: number;
+  onWorkers(n: number): void;
+  lengthMode: LengthMode;
+  onLengthMode(m: LengthMode): void;
+  /** Measured synthesis seconds per audio second, null until the speed test has run. */
+  bench: number | null;
+  benching: boolean;
+  onSpeedTest(): void;
   reduceFlashing: boolean;
   onReduceFlashing(on: boolean): void;
 }
@@ -99,6 +110,34 @@ export function SettingsPanel(p: SettingsPanelProps) {
         Load voice model
       </button>
       {p.device && <div className="badge">Running on {p.device}</div>}
+      <label>
+        Voice workers (parallel copies of the voice model)
+        <select value={p.workers} disabled={p.locked} onChange={(e) => p.onWorkers(Number(e.target.value))}>
+          {Array.from({ length: p.maxWorkers }, (_, i) => i + 1).map((n) => (
+            <option key={n} value={n}>
+              {n === 1 ? "1 (off, uses least memory)" : `${n} (faster, more memory)`}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        Story length
+        <select value={p.lengthMode} disabled={p.locked} onChange={(e) => p.onLengthMode(e.target.value as LengthMode)}>
+          <option value="auto">Auto (fit this computer)</option>
+          <option value="short">Short (half length)</option>
+          <option value="full">Full (as designed)</option>
+        </select>
+      </label>
+      <button onClick={p.onSpeedTest} disabled={p.locked || p.benching}>
+        {p.benching ? "Timing the voice…" : "Run voice speed test"}
+      </button>
+      <div className="badge">
+        {p.bench === null
+          ? "Not timed yet with this many workers."
+          : p.bench <= 1
+            ? `Voice is faster than speech (${p.bench.toFixed(2)}x).`
+            : `Voice takes ${p.bench.toFixed(1)}x as long as the speech it makes.`}
+      </div>
 
       <h3>Accessibility</h3>
       <label className="check">
