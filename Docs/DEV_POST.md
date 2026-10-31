@@ -5,7 +5,7 @@ TITLE: Localghost: a ghost story that knows where you live (and runs on your lap
 COVER IMAGE: a 1000x420 still of the photo reveal (the dining room, red-tinted and grainy) with the title in a serif font.
 TAGS: hf26challenge (required), plus e.g. ai, opensource, webdev
 
-Before publishing: fill or delete the two TODO comments below (agent session, The Spirit of It).
+Before publishing: fill or delete the TODO comment below (The Spirit of It), and check that the entire.com links open in a private window.
 Everything below this comment block is the post body.
 -->
 
@@ -23,13 +23,13 @@ Ghost stories work best when they're specific. "A house" isn't scary. *Your* hal
 
 🔗 **Live:** https://localghost.mrituanjay.tech. Press **Try it now — no setup**. No account, no key, no install. The voice model downloads once (about 90 MB) and then runs in your browser.
 
-{% embed https://youtu.be/I9caqypA-1k %}
+Demo-Link: https://youtu.be/I9caqypA-1k
 
 *Headphones recommended. To fit the video length, the story is played at **1.5× speed** in the recording; in the app it runs at its natural pace, with its silences intact. There's a photosensitivity notice and a "Reduce flashing" option.*
 
 ## Code
 
-{% github MJ-NJ/localghost %}
+github MJ-NJ/localghost
 
 MIT licensed. The README covers a full offline setup on Windows, macOS and Linux, choosing a model for your RAM, and a table of known gotchas. Every design decision, including the ones that could make it produce wrong output, is logged in [`Docs/ADR.md`](https://github.com/MJ-NJ/localghost/blob/master/Docs/ADR.md).
 
@@ -79,9 +79,17 @@ Where closed did win: ElevenLabs is more expressive and much faster. So it's an 
 
 ## My Agent Session
 
-I built this with **Claude Code** as a pair programmer, working milestone by milestone from a written plan, testing every stage by hand, and logging each decision in an ADR file. Entire captured the sessions as checkpoints alongside the commits.
+I built this with **Claude Code** as a pair programmer, working milestone by milestone from a written plan, testing every stage by hand, and logging each decision in an ADR file. **[Entire](https://entire.com)** recorded the whole thing: every prompt, reply, tool call and file change is saved as a checkpoint attached to the commit it produced, so you can trace any line of code back to the conversation that wrote it.
 
-<!-- TODO: replace this comment with the session embed once it is saved on DEV, e.g. {% agent_session <id-or-slug> %} -->
+📜 **All sessions and checkpoints:** https://entire.com/gh/MJ-NJ/localghost
+
+A few moments worth opening:
+- [The voice was pure crackle](https://entire.com/gh/MJ-NJ/localghost/commit/46c380de448cce17af019be8691ae971ce7d9a75): diagnosing that Kokoro on WebGPU produced noise on an AMD iGPU (it was fp32 on WebGPU, not the voice files), then [switching to WebAssembly](https://entire.com/gh/MJ-NJ/localghost/commit/a1a6e5ba38e66f7548d0927b67912dedb33e97a4).
+- [Why the voice was so slow](https://entire.com/gh/MJ-NJ/localghost/commit/0265288d25692dc2661a5d08650f3c2f935c0147): finding that ONNX Runtime ran on a single thread until the page was cross-origin isolated.
+- [Streaming playback](https://entire.com/gh/MJ-NJ/localghost/commit/7e3e00a999eeec4a33f4d4b6b47cff3ce084cd89): speaking while the rest of the story is still being synthesized.
+- [Only sending photos to models that can see](https://entire.com/gh/MJ-NJ/localghost/commit/0e37882f5eeb75474be3811ee265046bb27f218f), after my first Gemma build rejected images.
+
+<!-- Optional: a DEV agent-session embed, e.g. {% agent_session <id-or-slug> %}, if you also save the session on DEV. -->
 
 ## The Spirit of It
 
@@ -92,7 +100,7 @@ I built this with **Claude Code** as a pair programmer, working milestone by mil
 - **Best Use of Gemma**: Gemma writes every story locally through Ollama, and Gemma 3 4B reads your photos to set the story in your real room.
 - **Best Use of ElevenLabs**: an optional `eleven_v4` voice with audio-tag direction, a restricted key and per-line caching.
 - **Best Use of Render**: a static site deployed from a Render Blueprint, with the cross-origin isolation headers that make the in-browser voice multi-threaded.
-- **Best Use of Entire**: agent sessions captured as checkpoints alongside the commits.
+- **Best Use of Entire**: the entire build, every agent session and checkpoint tied to its commit, is browsable at https://entire.com/gh/MJ-NJ/localghost.
 - **Best Use of a .tech Domain**: https://localghost.mrituanjay.tech
 
 ---
